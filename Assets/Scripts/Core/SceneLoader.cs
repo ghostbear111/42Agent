@@ -23,6 +23,8 @@ namespace GalaxyAgent.Core
             {
                 var go = new GameObject("[SceneLoader]");
                 loader = go.AddComponent<SceneLoader>();
+                // 异步加载期间旧场景会被卸载，加载器必须跨场景存活才能稳定跑完整个协程。
+                DontDestroyOnLoad(go);
             }
             loader.StartCoroutine(loader.LoadSceneAsync(sceneName, onComplete));
         }

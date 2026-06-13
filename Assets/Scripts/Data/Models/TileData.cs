@@ -29,6 +29,8 @@ namespace GalaxyAgent.Data.Models
         public int ResourceNodeId = -1;
         /// <summary>该格上的威胁ID（-1表示无威胁）</summary>
         public int ThreatId = -1;
+        /// <summary>该格上的探索发现ID（-1表示无发现）</summary>
+        public int DiscoveryId = -1;
 
         /// <summary>
         /// 便捷构造方法

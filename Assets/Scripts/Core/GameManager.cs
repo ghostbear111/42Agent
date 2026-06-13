@@ -45,11 +45,12 @@ namespace GalaxyAgent.Core
         /// <summary>
         /// 开始新游戏（从地图生成场景调用）
         /// </summary>
-        public void StartNewGame(MapConfig config, int seed)
+        public void StartNewGame(MapConfig config, int seed, string saveId = "")
         {
             CurrentMapConfig = config;
             CurrentSeed = seed;
-            CurrentSaveId = ""; // 新游戏尚未存档
+            // 地图生成阶段已经创建存档，这里必须保留存档ID，避免进入游戏后保存目标丢失。
+            CurrentSaveId = saveId ?? "";
             IsInGame = true;
             IsPaused = false;
             TimeMultiplier = 1f;
@@ -57,14 +58,7 @@ namespace GalaxyAgent.Core
             Debug.Log($"[GameManager] 开始新游戏 - 星球: {config.PlanetName}, 种子: {seed}, " +
                       $"地图: {config.MapWidth}×{config.MapWidth}");
 
-            SceneLoader.LoadScene(Constants.SCENE_GAME, () =>
-            {
-                EventBus.Publish(new NewGameStartedEvent
-                {
-                    MapConfig = config,
-                    Seed = seed
-                });
-            });
+            SceneLoader.LoadScene(Constants.SCENE_GAME);
         }
 
         /// <summary>
@@ -79,10 +73,10 @@ namespace GalaxyAgent.Core
 
             Debug.Log($"[GameManager] 加载存档: {saveId}");
 
-            SceneLoader.LoadScene(Constants.SCENE_GAME, () =>
-            {
-                EventBus.Publish(new GameLoadedEvent { SaveId = saveId });
-            });
+            CurrentMapConfig = null;
+            CurrentSeed = 0;
+
+            SceneLoader.LoadScene(Constants.SCENE_GAME);
         }
 
         /// <summary>
@@ -105,6 +99,9 @@ namespace GalaxyAgent.Core
             IsInGame = false;
             IsPaused = false;
             TimeMultiplier = 1f;
+            CurrentSaveId = "";
+            CurrentMapConfig = null;
+            CurrentSeed = 0;
             EventBus.Clear();
             SceneLoader.LoadScene(Constants.SCENE_MAIN_MENU);
         }

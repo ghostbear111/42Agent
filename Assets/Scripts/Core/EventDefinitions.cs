@@ -166,4 +166,68 @@ namespace GalaxyAgent.Core
         /// <summary>点击的格子坐标</summary>
         public Vector2Int TilePosition;
     }
+
+    // ==================== 战斗事件 ====================
+
+    /// <summary>战斗事件（Agent攻击威胁或受到反击）</summary>
+    public class CombatEvent : IEvent
+    {
+        /// <summary>发起攻击的Agent ID</summary>
+        public string AgentId;
+        /// <summary>被攻击的威胁ID</summary>
+        public int ThreatId;
+        /// <summary>Agent对威胁造成的伤害</summary>
+        public float DamageDealt;
+        /// <summary>威胁对Agent造成的反击伤害</summary>
+        public float DamageReceived;
+    }
+
+    /// <summary>威胁被击杀事件</summary>
+    public class ThreatKilledEvent : IEvent
+    {
+        /// <summary>被击杀的威胁ID</summary>
+        public int ThreatId;
+        /// <summary>击杀者的Agent ID</summary>
+        public string AgentId;
+    }
+
+    // ==================== 发现/调查事件 ====================
+
+    /// <summary>Agent发现可调查目标事件</summary>
+    public class DiscoveryFoundEvent : IEvent
+    {
+        /// <summary>发现者Agent ID</summary>
+        public string AgentId;
+        /// <summary>发现的ID</summary>
+        public int DiscoveryId;
+    }
+
+    /// <summary>调查完成事件（获得奖励）</summary>
+    public class DiscoveryInvestigatedEvent : IEvent
+    {
+        /// <summary>调查者Agent ID</summary>
+        public string AgentId;
+        /// <summary>调查的发现ID</summary>
+        public int DiscoveryId;
+    }
+
+    // ==================== 科技/升级事件 ====================
+
+    /// <summary>科技解锁事件</summary>
+    public class TechUnlockedEvent : IEvent
+    {
+        /// <summary>解锁科技的Agent ID</summary>
+        public string AgentId;
+        /// <summary>解锁的科技类型</summary>
+        public TechType TechType;
+    }
+
+    /// <summary>Agent升级事件</summary>
+    public class AgentLevelUpEvent : IEvent
+    {
+        /// <summary>升级的Agent ID</summary>
+        public string AgentId;
+        /// <summary>新等级</summary>
+        public int NewLevel;
+    }
 }

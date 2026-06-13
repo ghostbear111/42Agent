@@ -229,7 +229,9 @@ namespace GalaxyAgent.Data.Enums
         /// <summary>护卫中</summary>
         Guarding = 7,
         /// <summary>巡逻中</summary>
-        Patrolling = 8
+        Patrolling = 8,
+        /// <summary>调查发现中</summary>
+        Investigating = 9
     }
 
     // ==================== 记忆 ====================
@@ -296,5 +298,49 @@ namespace GalaxyAgent.Data.Enums
         Size32 = 32,
         /// <summary>64×64像素</summary>
         Size64 = 64
+    }
+
+    // ==================== 探索发现 ====================
+
+    /// <summary>
+    /// 地图发现/事件类型
+    /// 在RuinField和CrystalWaste区域中随机生成
+    /// </summary>
+    public enum DiscoveryType
+    {
+        /// <summary>遗迹建筑 — 可调查获取遗迹数据</summary>
+        RuinStructure = 0,
+        /// <summary>远古终端 — 可调查获取科技数据</summary>
+        AncientTerminal = 1,
+        /// <summary>能量异常 — 高辐射区域，调查获取晶体</summary>
+        Anomaly = 2,
+        /// <summary>坠毁飞船 — 可搜寻稀有资源</summary>
+        CrashedShip = 3,
+        /// <summary>研究缓存 — 前人留下的物资箱</summary>
+        ResearchCache = 4
+    }
+
+    // ==================== 科技升级 ====================
+
+    /// <summary>
+    /// 科技类型
+    /// 在基地消耗资源解锁，永久提升Agent能力
+    /// </summary>
+    public enum TechType
+    {
+        /// <summary>攻击强化 — 提升攻击力20%</summary>
+        AttackBoost = 0,
+        /// <summary>防御强化 — 提升防御力20%</summary>
+        DefenseBoost = 1,
+        /// <summary>移动优化 — 提升移动速度15%</summary>
+        SpeedBoost = 2,
+        /// <summary>扩展背包 — 提升携带上限30%</summary>
+        CarryBoost = 3,
+        /// <summary>采集增效 — 提升采集效率25%</summary>
+        GatherBoost = 4,
+        /// <summary>感知扩展 — 提升感知半径50%</summary>
+        PerceptionBoost = 5,
+        /// <summary>节能训练 — 降低能量消耗20%</summary>
+        EnergyEfficiency = 6
     }
 }

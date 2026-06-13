@@ -24,7 +24,6 @@ namespace GalaxyAgent.World.Base
         // 点击检测
         private SpriteRenderer _renderer;
         private Collider2D _collider;
-        private bool _initialized = false;
 
         /// <summary>
         /// 初始化基地
@@ -48,11 +47,16 @@ namespace GalaxyAgent.World.Base
             _collider = GetComponent<BoxCollider2D>();
             if (_collider == null)
                 _collider = gameObject.AddComponent<BoxCollider2D>();
+            if (_collider is BoxCollider2D boxCollider)
+            {
+                boxCollider.size = Vector2.one;
+                boxCollider.offset = Vector2.zero;
+                boxCollider.isTrigger = false;
+            }
 
             // 设置缩放让基地显眼一点
             transform.localScale = new Vector3(2f, 2f, 1f);
 
-            _initialized = true;
             Debug.Log($"[BaseController] 基地初始化于 ({position.x}, {position.y})");
         }
 

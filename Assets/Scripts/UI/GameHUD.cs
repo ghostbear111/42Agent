@@ -314,6 +314,11 @@ namespace GalaxyAgent.UI
         private void OnSaveClicked()
         {
             if (_saveManager == null || _agents == null) return;
+            if (string.IsNullOrEmpty(GameManager.Instance.CurrentSaveId))
+            {
+                Debug.LogError("[GameHUD] 保存失败：当前没有有效存档ID");
+                return;
+            }
 
             var agentArray = new AgentData[_agents.Count];
             int i = 0;

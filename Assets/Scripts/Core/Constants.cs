@@ -134,5 +134,37 @@ namespace GalaxyAgent.Core
         public const string DATABASE_FILE_NAME = "galaxy_agent_saves.db";
         /// <summary>短期记忆最大条数</summary>
         public const int SHORT_TERM_MEMORY_CAPACITY = 20;
+
+        // ==================== 战斗系统 ====================
+        /// <summary>攻击冷却时间（秒）</summary>
+        public const float ATTACK_COOLDOWN = 1.5f;
+        /// <summary>最低伤害值（伤害公式保底）</summary>
+        public const float MIN_DAMAGE = 1f;
+        /// <summary>威胁攻击范围（格）</summary>
+        public const float THREAT_ATTACK_RANGE = 1.5f;
+        /// <summary>威胁检测范围倍率（基于DetectionRange）</summary>
+        public const float THREAT_AGGRO_MULTIPLIER = 1.2f;
+        /// <summary>击杀威胁获得经验值</summary>
+        public const float XP_KILL_THREAT = 10f;
+
+        // ==================== 采集系统 ====================
+        /// <summary>基础采集时间（秒），实际 = 基础 × 硬度 / 采集效率</summary>
+        public const float BASE_GATHER_TIME = 2f;
+        /// <summary>采集资源获得经验值（每次）</summary>
+        public const float XP_GATHER_RESOURCE = 1f;
+
+        // ==================== 发现/事件 ====================
+        /// <summary>发现物生成密度（0-1概率）</summary>
+        public const float DISCOVERY_DENSITY = 0.002f;
+        /// <summary>发现物采样间隔（每隔N格检查一次）</summary>
+        public const int DISCOVERY_SAMPLE_INTERVAL = 15;
+        /// <summary>调查发现获得经验值</summary>
+        public const float XP_DISCOVERY = 5f;
+
+        // ==================== 经验升级 ====================
+        /// <summary>每级所需经验值倍数（Level × 此值）</summary>
+        public const float XP_PER_LEVEL = 100f;
+        /// <summary>升级时恢复生命百分比</summary>
+        public const float LEVEL_UP_HEAL_PERCENT = 0.2f;
     }
 }

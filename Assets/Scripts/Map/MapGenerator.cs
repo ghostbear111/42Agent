@@ -24,6 +24,8 @@ namespace GalaxyAgent.Map
         private List<ResourceNodeData> _resources = new List<ResourceNodeData>();
         // 所有威胁实体
         private List<ThreatData> _threats = new List<ThreatData>();
+        // 所有发现点
+        private List<DiscoveryData> _discoveries = new List<DiscoveryData>();
         // 分块数量（每维）
         private int _chunkCountX;
         private int _chunkCountY;
@@ -34,6 +36,8 @@ namespace GalaxyAgent.Map
         public List<ResourceNodeData> Resources => _resources;
         /// <summary>所有威胁</summary>
         public List<ThreatData> Threats => _threats;
+        /// <summary>所有发现点</summary>
+        public List<DiscoveryData> Discoveries => _discoveries;
         /// <summary>所有分块</summary>
         public Dictionary<string, ChunkData> Chunks => _chunks;
 

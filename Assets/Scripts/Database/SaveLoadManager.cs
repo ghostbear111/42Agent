@@ -6,6 +6,7 @@
 /// </summary>
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
@@ -200,13 +201,14 @@ namespace GalaxyAgent.Database
             string safeId = DatabaseManager.Escape(saveId);
             string safeAgentId = DatabaseManager.Escape(agent.AgentId);
             string carryingType = agent.CarryingType.HasValue ? agent.CarryingType.Value.ToString() : "NULL";
+            string inventoryJson = SerializeStorage(agent.Inventory);
 
             _db.ExecuteNonQuery($@"
                 INSERT OR REPLACE INTO agent_states
                     (agent_id, save_id, agent_type, display_name, position_x, position_y,
                      health, max_health, hunger, energy, carrying_type, carrying_amount, max_carry,
                      current_state, current_task, attack_power, defense, explore_speed,
-                     gather_efficiency, level)
+                     gather_efficiency, level, inventory_json)
                 VALUES ('{safeAgentId}', '{safeId}', '{agent.AgentType}',
                     '{DatabaseManager.Escape(agent.DisplayName)}',
                     {agent.Position.x}, {agent.Position.y},
@@ -214,7 +216,7 @@ namespace GalaxyAgent.Database
                     '{carryingType}', {agent.CarryingAmount}, {agent.MaxCarry},
                     '{agent.CurrentState}', '{DatabaseManager.Escape(agent.CurrentTask)}',
                     {agent.AttackPower}, {agent.Defense}, {agent.ExploreSpeed},
-                    {agent.GatherEfficiency}, {agent.Level})");
+                    {agent.GatherEfficiency}, {agent.Level}, '{DatabaseManager.Escape(inventoryJson)}')");
         }
 
         /// <summary>
@@ -229,7 +231,7 @@ namespace GalaxyAgent.Database
                 $"SELECT agent_id, agent_type, display_name, position_x, position_y, " +
                 $"health, max_health, hunger, energy, carrying_type, carrying_amount, max_carry, " +
                 $"current_state, current_task, attack_power, defense, explore_speed, " +
-                $"gather_efficiency, level FROM agent_states WHERE save_id = '{safeId}'",
+                $"gather_efficiency, level, inventory_json FROM agent_states WHERE save_id = '{safeId}'",
                 columns =>
                 {
                     var agent = new AgentData
@@ -260,6 +262,16 @@ namespace GalaxyAgent.Database
                         agent.CarryingType = ParseEnum<ResourceType>(carryingStr);
                     }
 
+                    var inventory = columns.Length > 19
+                        ? DeserializeStorage(columns[19])
+                        : new Dictionary<ResourceType, float>();
+                    if (inventory.Count == 0 && agent.CarryingType.HasValue && agent.CarryingAmount > 0f)
+                    {
+                        // 兼容旧存档：用旧版携带字段重建单槽背包。
+                        inventory[agent.CarryingType.Value] = agent.CarryingAmount;
+                    }
+                    agent.SetInventory(inventory);
+
                     agents.Add(agent);
                 });
 
@@ -275,6 +287,12 @@ namespace GalaxyAgent.Database
             float playTime, int gameDay, Dictionary<ResourceType, float> baseStorage,
             float gameTimeSeconds = 0f)
         {
+            if (string.IsNullOrEmpty(saveId))
+            {
+                Debug.LogError("[SaveLoadManager] 保存失败：当前存档ID为空");
+                return;
+            }
+
             // 更新存档元数据（包含游戏内时间秒数，决定加载后的昼夜时刻）
             _db.ExecuteNonQuery($@"
                 UPDATE saves SET
@@ -347,7 +365,9 @@ namespace GalaxyAgent.Database
         private static float ParseFloat(string value)
         {
             if (string.IsNullOrEmpty(value)) return 0f;
-            return float.TryParse(value, out float result) ? result : 0f;
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float result))
+                return result;
+            return float.TryParse(value, out result) ? result : 0f;
         }
 
         /// <summary>
@@ -364,10 +384,12 @@ namespace GalaxyAgent.Database
         /// </summary>
         private static string SerializeStorage(Dictionary<ResourceType, float> storage)
         {
+            if (storage == null || storage.Count == 0) return "{}";
+
             var parts = new List<string>();
             foreach (var kvp in storage)
             {
-                parts.Add($"\"{kvp.Key}\":{kvp.Value}");
+                parts.Add($"\"{kvp.Key}\":{kvp.Value.ToString(CultureInfo.InvariantCulture)}");
             }
             return "{" + string.Join(",", parts) + "}";
         }
@@ -391,7 +413,7 @@ namespace GalaxyAgent.Database
                         string key = kv[0].Trim().Trim('"');
                         if (Enum.TryParse<ResourceType>(key, out var resType))
                         {
-                            storage[resType] = float.Parse(kv[1].Trim());
+                            storage[resType] = ParseFloat(kv[1].Trim());
                         }
                     }
                 }

@@ -10,7 +10,7 @@ namespace GalaxyAgent.Database
     public static class DatabaseSchema
     {
         // 当前数据库版本
-        private const int DB_VERSION = 2;
+        private const int DB_VERSION = 3;
 
         /// <summary>
         /// 创建所有表（如果不存在）
@@ -37,15 +37,7 @@ namespace GalaxyAgent.Database
                 );");
 
             // 版本迁移：旧数据库可能缺少game_time_seconds列
-            // SqliteConnection.ExecuteNonQuery用LogError报错而非抛异常，所以先检测列是否存在
-            bool columnExists = false;
-            try
-            {
-                connection.ExecuteNonQuery("SELECT game_time_seconds FROM saves LIMIT 0");
-                columnExists = true;
-            }
-            catch { }
-            if (!columnExists)
+            if (!ColumnExists(connection, "saves", "game_time_seconds"))
             {
                 connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN game_time_seconds REAL NOT NULL DEFAULT 0");
             }
@@ -140,8 +132,15 @@ namespace GalaxyAgent.Database
                     explore_speed   REAL NOT NULL DEFAULT 1,
                     gather_efficiency REAL NOT NULL DEFAULT 1,
                     level           INTEGER NOT NULL DEFAULT 1,
+                    inventory_json  TEXT NOT NULL DEFAULT '{}',
                     PRIMARY KEY (agent_id, save_id)
                 );");
+
+            // 版本迁移：旧数据库只保存单一携带资源，新版本保存完整多槽背包
+            if (!ColumnExists(connection, "agent_states", "inventory_json"))
+            {
+                connection.ExecuteNonQuery("ALTER TABLE agent_states ADD COLUMN inventory_json TEXT NOT NULL DEFAULT '{}'");
+            }
 
             // 基地状态
             connection.ExecuteNonQuery(@"
@@ -210,6 +209,20 @@ namespace GalaxyAgent.Database
                 VALUES ({DB_VERSION}, '{now}');");
 
             Debug.Log("[DatabaseSchema] 数据库表结构创建/验证完成");
+        }
+
+        /// <summary>
+        /// 检查表字段是否存在，用于无损迁移旧数据库
+        /// </summary>
+        private static bool ColumnExists(SqliteConnection connection, string tableName, string columnName)
+        {
+            bool exists = false;
+            connection.ExecuteQuery($"PRAGMA table_info({tableName})", columns =>
+            {
+                if (columns.Length > 1 && columns[1] == columnName)
+                    exists = true;
+            });
+            return exists;
         }
     }
 }

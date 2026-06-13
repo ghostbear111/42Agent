@@ -49,6 +49,7 @@ namespace GalaxyAgent
         // 实体
         private BaseController _baseController;
         private Dictionary<string, AgentController> _agents = new Dictionary<string, AgentController>();
+        private bool _isInitialized;
 
         private void Start()
         {
@@ -83,6 +84,10 @@ namespace GalaxyAgent
             {
                 // 新游戏
                 InitializeNewGame(GameManager.Instance.CurrentMapConfig, GameManager.Instance.CurrentSeed);
+            }
+            else
+            {
+                Debug.LogWarning("[GameScene] 未找到当前存档或地图配置，场景保持待机状态");
             }
         }
 
@@ -156,13 +161,23 @@ namespace GalaxyAgent
             if (cam.GetComponent<CameraController>() == null)
                 cam.gameObject.AddComponent<CameraController>();
 
-            // 确保有分块管理器
-            var chunkMgrObj = new GameObject("[ChunkManager]");
-            _chunkManager = chunkMgrObj.AddComponent<ChunkManager>();
+            // 确保有分块管理器，避免场景重复初始化时生成多个运行时对象
+            if (_chunkManager == null)
+                _chunkManager = FindFirstObjectByType<ChunkManager>();
+            if (_chunkManager == null)
+            {
+                var chunkMgrObj = new GameObject("[ChunkManager]");
+                _chunkManager = chunkMgrObj.AddComponent<ChunkManager>();
+            }
 
-            // 确保有地图点击处理器
-            var clickObj = new GameObject("[MapClickHandler]");
-            _mapClickHandler = clickObj.AddComponent<MapClickHandler>();
+            // 确保有地图点击处理器，复用已有对象以避免重复发布点击事件
+            if (_mapClickHandler == null)
+                _mapClickHandler = FindFirstObjectByType<MapClickHandler>();
+            if (_mapClickHandler == null)
+            {
+                var clickObj = new GameObject("[MapClickHandler]");
+                _mapClickHandler = clickObj.AddComponent<MapClickHandler>();
+            }
             _mapClickHandler.Initialize(terrainTilemap);
 
             // 确保Agent父节点存在（如果场景中没有则创建）
@@ -180,6 +195,13 @@ namespace GalaxyAgent
         /// </summary>
         private void InitializeNewGame(MapConfig config, int seed)
         {
+            if (_isInitialized)
+            {
+                Debug.LogWarning("[GameScene] 初始化请求被忽略：游戏场景已经初始化");
+                return;
+            }
+            _isInitialized = true;
+
             _mapConfig = config;
             _seed = seed;
 
@@ -238,6 +260,12 @@ namespace GalaxyAgent
         /// </summary>
         private void LoadGame(string saveId)
         {
+            if (_isInitialized)
+            {
+                Debug.LogWarning("[GameScene] 加载请求被忽略：游戏场景已经初始化");
+                return;
+            }
+
             Debug.Log($"[GameScene] 加载存档: {saveId}");
 
             var saveData = _saveManager.GetSave(saveId);
@@ -246,11 +274,18 @@ namespace GalaxyAgent
                 Debug.LogError($"[GameScene] 存档 {saveId} 不存在！");
                 return;
             }
+            _isInitialized = true;
 
             // 从存档恢复配置
             _mapConfig = ScriptableObject.CreateInstance<MapConfig>();
             _mapConfig.PlanetName = saveData.PlanetName;
             _mapConfig.MapSize = (MapSize)saveData.MapSize;
+            _mapConfig.TileSize = (TilePixelSize)saveData.TileSize;
+            _mapConfig.Terrain = saveData.TerrainType;
+            _mapConfig.Resources = saveData.ResourceLevel;
+            _mapConfig.Risk = saveData.RiskLevel;
+            _mapConfig.Weather = saveData.WeatherType;
+            _mapConfig.DayNight = saveData.DayNightMode;
             _mapConfig.Seed = saveData.Seed;
             _seed = saveData.Seed;
 

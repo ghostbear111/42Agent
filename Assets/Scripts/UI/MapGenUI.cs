@@ -159,8 +159,7 @@ namespace GalaxyAgent.UI
             dbManager.Close();
 
             // 切换到游戏场景
-            GameManager.Instance.CurrentSaveId = saveId;
-            GameManager.Instance.StartNewGame(config, seed);
+            GameManager.Instance.StartNewGame(config, seed, saveId);
         }
 
         /// <summary>返回主菜单</summary>
