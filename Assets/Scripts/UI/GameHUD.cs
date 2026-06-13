@@ -56,6 +56,10 @@ namespace GalaxyAgent.UI
         public Button buttonSpeed2x;
         [Tooltip("5倍速按钮")]
         public Button buttonSpeed5x;
+        [Tooltip("LLM对话查看按钮")]
+        public Button buttonLLMChat;
+        [Tooltip("测试决策按钮（立即触发高层LLM决策）")]
+        public Button buttonTestDecision;
 
         [Header("信息面板")]
         [Tooltip("Agent信息面板")]
@@ -69,6 +73,8 @@ namespace GalaxyAgent.UI
         private Text[] _resourceTexts = new Text[5];
         // 防重复构建守卫
         private bool _uiBuilt = false;
+        // LLM对话查看窗口
+        private LLMConversationWindow _llmWindow;
 
         // 运行时子系统引用（由GameSceneController.Initialize设置）
         private TimeSystem _timeSystem;
@@ -96,6 +102,8 @@ namespace GalaxyAgent.UI
             if (buttonSpeed1x != null) buttonSpeed1x.onClick.AddListener(() => SetSpeed(1f));
             if (buttonSpeed2x != null) buttonSpeed2x.onClick.AddListener(() => SetSpeed(2f));
             if (buttonSpeed5x != null) buttonSpeed5x.onClick.AddListener(() => SetSpeed(5f));
+            if (buttonLLMChat != null) buttonLLMChat.onClick.AddListener(ToggleLLMWindow);
+            if (buttonTestDecision != null) buttonTestDecision.onClick.AddListener(OnTestDecisionClicked);
 
             // 订阅事件
             EventBus.Subscribe<AgentClickedEvent>(OnAgentClicked);
@@ -205,23 +213,55 @@ namespace GalaxyAgent.UI
                 "返回菜单", new Color(0.5f, 0.15f, 0.15f),
                 0.85f, 0.1f, 0.99f, 0.9f);
 
+            // LLM对话查看按钮（底栏中部空白区，紫色标识）
+            buttonLLMChat = RuntimeUIBuilder.CreateButton("BtnLLMChat", bottomBar.transform,
+                "LLM对话", new Color(0.35f, 0.25f, 0.55f),
+                0.58f, 0.1f, 0.70f, 0.9f);
+
+            // 测试决策按钮（立即触发所有Agent高层LLM决策，便于快速观察，无需等30秒）
+            buttonTestDecision = RuntimeUIBuilder.CreateButton("BtnTestDecision", bottomBar.transform,
+                "测试决策", new Color(0.7f, 0.5f, 0.15f),
+                0.46f, 0.1f, 0.57f, 0.9f);
+
+            // ==================== LLM对话查看窗口 ====================
+            // 运行时自构建，初始隐藏，点击"LLM对话"按钮切换显示
+            // 注意：中间层容器必须用RectTransform撑满父级，否则普通Transform在Canvas下无尺寸，
+            // 其下窗口面板的锚点会坍缩为0导致整个窗口不可见
+            var llmWindowObj = MakeFullScreenContainer("LLMConversationWindow", transform);
+            _llmWindow = llmWindowObj.AddComponent<LLMConversationWindow>();
+            _llmWindow.BuildUI(llmWindowObj.transform);
+
             // ==================== 侧边信息面板区域 ====================
             // Agent信息面板和基地信息面板共享右侧区域，同时只显示一个
             // anchor(0.78, 0.08) ~ (1.0, 0.92)
 
             // Agent信息面板
-            var agentPanelObj = new GameObject("AgentInfoPanel");
-            agentPanelObj.transform.SetParent(transform, false);
+            var agentPanelObj = MakeFullScreenContainer("AgentInfoPanel", transform);
             agentInfoPanel = agentPanelObj.AddComponent<AgentInfoPanel>();
             agentInfoPanel.BuildUI(agentPanelObj.transform);
 
             // 基地信息面板
-            var basePanelObj = new GameObject("BaseInfoPanel");
-            basePanelObj.transform.SetParent(transform, false);
+            var basePanelObj = MakeFullScreenContainer("BaseInfoPanel", transform);
             baseInfoPanel = basePanelObj.AddComponent<BaseInfoPanel>();
             baseInfoPanel.BuildUI(basePanelObj.transform);
 
             Debug.Log("[GameHUD] UI构建完成");
+        }
+
+        /// <summary>
+        /// 在Canvas下创建一个撑满父级的RectTransform容器，作为运行时面板的中间层。
+        /// 普通Transform在Canvas下没有尺寸，会导致子面板（用锚点定位）坍缩为0而不可见。
+        /// </summary>
+        private static GameObject MakeFullScreenContainer(string name, Transform parent)
+        {
+            var obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            var rt = obj.AddComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            return obj;
         }
 
         // ==================== 初始化（由GameSceneController调用） ====================
@@ -247,6 +287,12 @@ namespace GalaxyAgent.UI
             _saveManager = saveManager;
             _mapGenerator = mapGenerator;
             _mapConfig = mapConfig;
+
+            // 把所有AgentId注入LLM对话窗口，供左侧选择查看
+            if (_llmWindow != null && _agents != null)
+            {
+                _llmWindow.SetAgentIds(new List<string>(_agents.Keys));
+            }
 
             Debug.Log("[GameHUD] 初始化完成，子系统已连接");
         }
@@ -354,6 +400,49 @@ namespace GalaxyAgent.UI
         private void SetSpeed(float speed)
         {
             GameManager.Instance.SetTimeSpeed(speed);
+        }
+
+        /// <summary>
+        /// 切换LLM对话窗口的显示/隐藏
+        /// </summary>
+        private void ToggleLLMWindow()
+        {
+            if (_llmWindow == null)
+            {
+                Debug.LogWarning("[GameHUD] LLM对话窗口未初始化");
+                return;
+            }
+            if (_llmWindow.IsVisible)
+                _llmWindow.Hide();
+            else
+                _llmWindow.Show();
+            Debug.Log($"[GameHUD] LLM对话窗口已{(_llmWindow.IsVisible ? "打开" : "关闭")}");
+        }
+
+        /// <summary>
+        /// 测试按钮回调：立即触发所有Agent的高层LLM决策（跳过30秒定时），并自动打开对话窗口查看结果。
+        /// </summary>
+        private void OnTestDecisionClicked()
+        {
+            if (_agents == null || _agents.Count == 0)
+            {
+                Debug.LogWarning("[GameHUD] 测试决策失败：当前无Agent");
+                return;
+            }
+
+            string firstAgent = "global";
+            int count = 0;
+            foreach (var kvp in _agents)
+            {
+                if (count == 0) firstAgent = kvp.Key;
+                kvp.Value.TriggerHighLevelDecisionForTest();
+                count++;
+            }
+            Debug.Log($"[GameHUD] 已触发 {count} 个Agent的高层LLM决策测试");
+
+            // 自动打开对话窗口并切到第一个Agent，方便立即查看决策结果
+            if (_llmWindow != null)
+                _llmWindow.Show(firstAgent);
         }
 
         // ==================== 点击事件 ====================

@@ -154,7 +154,9 @@ namespace GalaxyAgent.LLM.Providers
             string model = string.IsNullOrEmpty(request.Model) ? _defaultModel : request.Model;
             // 构建JSON（不用Newtonsoft，手写简单JSON）
             string systemMsg = EscapeJson(request.SystemPrompt);
-            string userMsg = EscapeJson(request.UserPrompt);
+            // qwen3优化：追加 /no_think 关闭内置思考过程，使回复更短更快、更易完整输出JSON。
+            // （非qwen3模型会将其当作普通文本忽略，无副作用）
+            string userMsg = EscapeJson(request.UserPrompt) + " /no_think";
 
             return $"{{\"model\":\"{model}\"," +
                    $"\"messages\":[{{\"role\":\"system\",\"content\":\"{systemMsg}\"}}," +
@@ -165,23 +167,15 @@ namespace GalaxyAgent.LLM.Providers
 
         /// <summary>
         /// 解析Ollama响应
+        /// 提取 message.content 字段。
+        /// 注意：qwen3等模型把思考过程放在独立的 thinking 字段，content 才是最终答案；
+        /// 且 content 内容常含转义引号（如LLM回复JSON时 content="{"action":...}"），
+        /// 必须用逐字符读取、正确处理 \" 转义的方式提取，否则会在第一个转义引号处截断。
         /// </summary>
         private static LLMResponse ParseOllamaResponse(string json)
         {
             var response = new LLMResponse { Success = true };
-
-            // 简易JSON解析（Ollama返回 {"message":{"content":"..."},...} ）
-            string contentKey = "\"content\":\"";
-            int contentStart = json.IndexOf(contentKey, StringComparison.Ordinal);
-            if (contentStart >= 0)
-            {
-                contentStart += contentKey.Length;
-                int contentEnd = json.IndexOf("\"", contentStart, StringComparison.Ordinal);
-                if (contentEnd > contentStart)
-                {
-                    response.Content = UnescapeJson(json.Substring(contentStart, contentEnd - contentStart));
-                }
-            }
+            response.Content = ExtractJsonStringValue(json, "content");
 
             if (string.IsNullOrEmpty(response.Content))
             {
@@ -190,6 +184,73 @@ namespace GalaxyAgent.LLM.Providers
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// 从JSON文本中提取字符串字段的值。
+        /// 逐字符读取，正确处理 \" \\ \/ \n \t 等转义序列以及冒号后的空白，
+        /// 适用于Ollama响应中含转义引号的content字段（如LLM回复JSON内容）。
+        /// </summary>
+        private static string ExtractJsonStringValue(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(key)) return null;
+
+            string keyPattern = "\"" + key + "\"";
+            int idx = json.IndexOf(keyPattern, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            idx += keyPattern.Length;
+
+            // 跳过冒号与空白
+            while (idx < json.Length)
+            {
+                char c = json[idx];
+                if (c == ':' || c == ' ' || c == '\t' || c == '\n' || c == '\r') { idx++; continue; }
+                break;
+            }
+            if (idx >= json.Length || json[idx] != '"') return null;
+            idx++; // 跳过开头的引号
+
+            // 逐字符读取，直到未转义的结束引号
+            var sb = new StringBuilder();
+            while (idx < json.Length)
+            {
+                char c = json[idx];
+                if (c == '\\' && idx + 1 < json.Length)
+                {
+                    char next = json[idx + 1];
+                    // \uXXXX Unicode 转义（如 > = '>'，LLM回复中常见，必须解码否则显示成 u003e）
+                    if (next == 'u' && idx + 6 <= json.Length)
+                    {
+                        string hex = json.Substring(idx + 2, 4);
+                        if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out int code))
+                            sb.Append((char)code);
+                        else
+                            sb.Append(json.Substring(idx, 6)); // 解析失败则原样保留
+                        idx += 6;
+                        continue;
+                    }
+                    // 处理转义序列
+                    switch (next)
+                    {
+                        case '"': sb.Append('"'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case '/': sb.Append('/'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        case 'b': sb.Append('\b'); break;
+                        case 'f': sb.Append('\f'); break;
+                        default: sb.Append(next); break;
+                    }
+                    idx += 2;
+                    continue;
+                }
+                if (c == '"') break; // 未转义的结束引号
+                sb.Append(c);
+                idx++;
+            }
+            return sb.ToString();
         }
 
         /// <summary>

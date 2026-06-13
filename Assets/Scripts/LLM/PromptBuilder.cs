@@ -75,10 +75,13 @@ namespace GalaxyAgent.LLM
         /// </summary>
         public static string BuildSystemPrompt()
         {
-            return "你是一个星球探索AI Agent的决策系统。" +
-                   "你的目标是确保Agent的生存并完成探索任务。" +
-                   "你必须以JSON格式回复，不要输出其他内容。" +
-                   "优先级: 生存 > 完成任务 > 探索未知 > 采集资源。";
+            return "你是一个星球探索AI Agent的高层决策系统。" +
+                   "目标：确保Agent生存并完成探索任务。优先级: 生存 > 完成任务 > 探索未知 > 采集资源。" +
+                   "你必须【只】回复一行JSON，格式严格如下，不得增删字段、不得输出思考或解释或其它任何文字：" +
+                   "{\"action\":\"explore|gather|return|flee|rest\"," +
+                   "\"direction\":\"north|south|east|west|stay\"," +
+                   "\"target\":\"具体目标\",\"reasoning\":\"一句话理由\"}。" +
+                   "当action为explore时direction必填，其余情况direction填stay。";
         }
 
         private static string GetTypeName(AgentType type)

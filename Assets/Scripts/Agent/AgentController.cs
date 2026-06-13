@@ -59,6 +59,11 @@ namespace GalaxyAgent
         private DiscoveryData _investigateTarget;
         private float _investigateTimer;
 
+        // 重大事件检测（用于触发高层LLM决策，见DetectMajorEvents）
+        private int _lastThreatCount;
+        private float _lastHealth;
+        private bool _eventTrackingInitialized;
+
         // 外部引用
         private MapGenerator _mapGenerator;
         private ChunkManager _chunkManager;
@@ -132,6 +137,9 @@ namespace GalaxyAgent
 
             // 感知环境
             Perceive();
+
+            // 检测重大事件（遭遇威胁/受重创），必要时立即触发高层LLM决策
+            DetectMajorEvents();
 
             // 决策
             _decisionTimer += dt;
@@ -251,6 +259,40 @@ namespace GalaxyAgent
                     _nearbyThreats.Add(threat);
                 }
             }
+        }
+
+        /// <summary>
+        /// 检测重大事件并触发高层LLM决策。
+        /// 触发条件：从无威胁到发现威胁（遭遇威胁）、生命值骤降（受到重创）。
+        /// 事件触发受LLM事件冷却约束（见AgentBrain），不会高频打扰LLM。
+        /// </summary>
+        private void DetectMajorEvents()
+        {
+            if (AgentData == null || _brain == null) return;
+
+            // 首次初始化基线，避免启动即触发误报
+            if (!_eventTrackingInitialized)
+            {
+                _lastThreatCount = _nearbyThreats.Count;
+                _lastHealth = AgentData.Health;
+                _eventTrackingInitialized = true;
+                return;
+            }
+
+            // 事件1：遭遇新威胁（上一刻无威胁，此刻出现威胁）
+            if (_lastThreatCount == 0 && _nearbyThreats.Count > 0)
+            {
+                _brain.TriggerHighLevelForEvent($"遭遇威胁x{_nearbyThreats.Count}");
+            }
+            _lastThreatCount = _nearbyThreats.Count;
+
+            // 事件2：生命值骤降（相比上一刻下降超过阈值，通常由战斗造成）
+            float healthDelta = _lastHealth - AgentData.Health;
+            if (healthDelta >= 20f)
+            {
+                _brain.TriggerHighLevelForEvent($"受到重创-{healthDelta:F0}");
+            }
+            _lastHealth = AgentData.Health;
         }
 
         // ==================== 状态执行 ====================
@@ -669,6 +711,12 @@ namespace GalaxyAgent
 
             int center = Mathf.Max(0, _mapWidth / 2);
             return new Vector2Int(center, center);
+        }
+
+        /// <summary>测试用：立即触发一次高层LLM决策（由GameHUD"测试决策"按钮调用，无需等30秒）</summary>
+        public void TriggerHighLevelDecisionForTest()
+        {
+            _brain?.ForceHighLevelLLMRequest();
         }
 
         // ==================== 采集/战斗/调查的公共设置方法（由AgentBrain调用） ====================

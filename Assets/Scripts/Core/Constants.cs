@@ -124,10 +124,25 @@ namespace GalaxyAgent.Core
         public const string OLLAMA_DEFAULT_URL = "http://localhost:11434";
         /// <summary>默认Ollama模型</summary>
         public const string OLLAMA_DEFAULT_MODEL = "qwen3:8b";
+        /// <summary>Ollama可选模型预设（供配置界面选择，参数越小推理越快）</summary>
+        public static readonly string[] OLLAMA_MODEL_OPTIONS =
+        {
+            "qwen3:8b",            // 默认，质量高但慢
+            "qwen3-1.5b-turbo",    // 极快，适合高层决策
+            "llama3.2:3b",         // 平衡
+            "llama3.2:1b",         // 最快，质量一般
+            "gemma2:2b"            // 轻量
+        };
         /// <summary>LLM请求超时时间（秒）</summary>
         public const float LLM_REQUEST_TIMEOUT = 10f;
         /// <summary>LLM最大输出Token数</summary>
-        public const int LLM_MAX_TOKENS = 512;
+        public const int LLM_MAX_TOKENS = 1024;
+        /// <summary>每个Agent保留的LLM对话记录条数上限（超出自动裁剪最早的）</summary>
+        public const int LLM_CONVERSATION_LOG_MAX = 50;
+        /// <summary>重大事件触发高层LLM决策的最小冷却时间（游戏秒）</summary>
+        public const float LLM_EVENT_TRIGGER_COOLDOWN = 15f;
+        /// <summary>全局同时进行的LLM请求数上限（本地Ollama建议保持1，避免压垮）</summary>
+        public const int LLM_MAX_CONCURRENT_REQUESTS = 1;
 
         // ==================== 数据库相关 ====================
         /// <summary>存档数据库文件名</summary>

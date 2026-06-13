@@ -42,7 +42,6 @@ namespace GalaxyAgent
         private DatabaseManager _dbManager;
         private SaveLoadManager _saveManager;
         private MemoryManager _memoryManager;
-        private LLMClient _llmClient;
         private MapConfig _mapConfig;
         private int _seed;
 
@@ -63,12 +62,9 @@ namespace GalaxyAgent
             _dbManager.Initialize();
             _saveManager = new SaveLoadManager(_dbManager);
 
-            // 初始化LLM客户端
-            _llmClient = new LLMClient();
-            _llmClient.CheckAvailability(available =>
-            {
-                Debug.Log($"[GameScene] LLM {(available ? "已连接" : "未连接，使用本地决策")}");
-            });
+            // 初始化LLM管理器（全局单例：内部创建唯一LLM客户端并异步检查可用性，
+            // Agent高层决策与"查看对话"窗口都通过它访问LLM，不再各自持有客户端）
+            _ = LLMManager.Instance;
 
             // 订阅场景事件
             EventBus.Subscribe<NewGameStartedEvent>(OnNewGameStarted);
