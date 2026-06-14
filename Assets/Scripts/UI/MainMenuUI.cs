@@ -66,9 +66,10 @@ namespace GalaxyAgent.UI
         {
             RuntimeUIBuilder.EnsureEventSystem();
 
-            // 背景
-            RuntimeUIBuilder.CreatePanel("Background", transform, new Color(0.05f, 0.05f, 0.15f),
+            // 背景（贴场景背景图，覆盖默认面板底纹）
+            var bg = RuntimeUIBuilder.CreatePanel("Background", transform, new Color(0.05f, 0.05f, 0.15f),
                 0f, 0f, 1f, 1f);
+            RuntimeUIBuilder.ApplySceneBackground(bg, "mainmenu");
 
             // 标题
             RuntimeUIBuilder.CreateText("Title", transform,

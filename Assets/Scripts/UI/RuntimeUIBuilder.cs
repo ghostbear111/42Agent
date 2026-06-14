@@ -17,6 +17,24 @@ namespace GalaxyAgent.UI
 {
     public static class RuntimeUIBuilder
     {
+        // ==================== 全局共享字体 ====================
+
+        /// <summary>
+        /// 全局共享动态字体（所有 Text / Dropdown / InputField 复用同一实例）。
+        ///
+        /// 为什么必须共享：Font.CreateDynamicFontFromOSFont 每次都新建一个独立动态字体，
+        /// 各自维护一张字形纹理图集。若为每个 Text 各建一个 Font（旧实现即如此），则每次
+        /// 刷新面板（如科技树点击"解锁"后 RefreshList 重建所有节点行，且事件回调 + 手动调用
+        /// 同帧重建两轮）会瞬间创建/销毁大量孤立字体对象，触发 Unity 底层字体纹理重建，
+        /// 导致全部 Text 渲染为空白 —— 表现为"点击解锁后所有文字消失"。复用单一实例即可彻底规避。
+        ///
+        /// 字号安全：动态字体会按 Text.fontSize 动态请求对应大小字形烘焙进图集，
+        /// 故一个以 size=16 建立的共享字体能正确渲染任意字号文本。
+        /// </summary>
+        private static Font _sharedFont;
+        private static Font SharedFont =>
+            _sharedFont != null ? _sharedFont : (_sharedFont = Font.CreateDynamicFontFromOSFont("Arial", 16));
+
         // ==================== 通用辅助方法 ====================
 
         /// <summary>创建标准Canvas</summary>
@@ -45,7 +63,9 @@ namespace GalaxyAgent.UI
         {
             var obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
-            obj.AddComponent<Image>().color = color;
+            var img = obj.AddComponent<Image>();
+            // 默认贴通用面板底纹（Sliced+tint，保留各面板原色）；无皮肤则纯色
+            SpriteRegistry.ApplySkin(img, SpriteRegistry.GetPanelSkin(), color);
             var r = obj.GetComponent<RectTransform>();
             r.anchorMin = new Vector2(xMin, yMin);
             r.anchorMax = new Vector2(xMax, yMax);
@@ -61,7 +81,7 @@ namespace GalaxyAgent.UI
             var obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
             var t = obj.AddComponent<Text>();
-            t.font = Font.CreateDynamicFontFromOSFont("Arial", fontSize);
+            t.font = SharedFont;
             t.fontSize = fontSize;
             t.color = color;
             t.alignment = alignment;
@@ -75,19 +95,101 @@ namespace GalaxyAgent.UI
 
         /// <summary>创建按钮</summary>
         public static Button CreateButton(string name, Transform parent, string label, Color color,
-            float xMin, float yMin, float xMax, float yMax)
+            float xMin, float yMin, float xMax, float yMax, Sprite iconSprite = null)
         {
             var obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
-            obj.AddComponent<Image>().color = color;
+            var img = obj.AddComponent<Image>();
+            // 默认贴通用按钮皮肤（Sliced+tint，保留按钮原色）；无皮肤则纯色
+            SpriteRegistry.ApplySkin(img, SpriteRegistry.GetButtonSkin(), color);
             var btn = obj.AddComponent<Button>();
             var r = obj.GetComponent<RectTransform>();
             r.anchorMin = new Vector2(xMin, yMin);
             r.anchorMax = new Vector2(xMax, yMax);
             r.sizeDelta = Vector2.zero;
-            // 按钮文字
-            CreateText("Text", obj.transform, label, 20, Color.white, TextAnchor.MiddleCenter);
+
+            // 未显式传图标时，按 label 自动匹配功能图标（如"保存"→icon_save），实现零调用点接入
+            iconSprite ??= AutoIconForLabel(label);
+            if (iconSprite != null)
+            {
+                // 有图标：水平排列 [图标 + 文字]
+                var row = new GameObject("Content");
+                row.transform.SetParent(obj.transform, false);
+                var rowRt = row.AddComponent<RectTransform>();
+                rowRt.anchorMin = Vector2.zero; rowRt.anchorMax = Vector2.one;
+                rowRt.offsetMin = Vector2.zero; rowRt.offsetMax = Vector2.zero;
+                var hlg = row.AddComponent<HorizontalLayoutGroup>();
+                hlg.childControlWidth = true; hlg.childControlHeight = true;
+                hlg.childForceExpandWidth = false; hlg.childForceExpandHeight = true;
+                hlg.childAlignment = TextAnchor.MiddleCenter;
+                hlg.spacing = 6;
+
+                var iconObj = new GameObject("Icon");
+                iconObj.transform.SetParent(row.transform, false);
+                var iconImg = iconObj.AddComponent<Image>();
+                iconImg.sprite = iconSprite;
+                iconImg.color = Color.white;
+                iconImg.preserveAspect = true;
+                var iconLe = iconObj.AddComponent<LayoutElement>();
+                iconLe.preferredWidth = 20;
+                iconLe.preferredHeight = 20;
+
+                CreateText("Text", row.transform, label, 20, Color.white, TextAnchor.MiddleLeft);
+            }
+            else
+            {
+                // 无图标：居中文字（保持原样）
+                CreateText("Text", obj.transform, label, 20, Color.white, TextAnchor.MiddleCenter);
+            }
             return btn;
+        }
+
+        /// <summary>
+        /// 按按钮 label 文本自动匹配功能图标文件名（无匹配返回 null）。
+        /// 让所有功能按钮零调用点自动获得图标；动态列表项（存档行/Agent选择等 label 不匹配）自然无图标。
+        /// 新增功能按钮只需在此 switch 加一条 label→图标名 映射。
+        /// </summary>
+        private static Sprite AutoIconForLabel(string label)
+        {
+            string key = label switch
+            {
+                "暂停" => "pause",
+                "配置" => "config",
+                "LLM对话" => "chat",
+                "保存" => "save",
+                "返回菜单" => "home",
+                "返回" => "home",
+                "Back" => "home",
+                "X" => "close",
+                "关闭" => "close",
+                "Close" => "close",
+                "科技树" => "tech",
+                "解锁" => "unlock",
+                "确认" => "confirm",
+                "取消" => "cancel",
+                "发射" => "launch",
+                "Launch" => "launch",
+                "刷新" => "refresh",
+                "发送" => "send",
+                "新游戏" => "newgame",
+                "加载游戏" => "load",
+                "加载" => "load",
+                "退出" => "quit",
+                _ => null
+            };
+            return key != null ? SpriteRegistry.GetButtonIcon(key) : null;
+        }
+
+        /// <summary>
+        /// 把 CreatePanel 创建的面板改为贴场景背景图（Simple 全屏，覆盖默认 panelSkin）。
+        /// 调用方无需引用 Image 类型。
+        /// </summary>
+        public static void ApplySceneBackground(GameObject panel, string bgName)
+        {
+            if (panel == null) return;
+            var img = panel.GetComponent<Image>();
+            if (img == null) return;
+            SpriteRegistry.ApplySpriteOrColor(img, SpriteRegistry.GetSceneBg(bgName));
         }
 
         /// <summary>
@@ -185,7 +287,7 @@ namespace GalaxyAgent.UI
             var captionObj = new GameObject("Caption");
             captionObj.transform.SetParent(ddObj.transform, false);
             var captionText = captionObj.AddComponent<Text>();
-            captionText.font = Font.CreateDynamicFontFromOSFont("Arial", 16);
+            captionText.font = SharedFont;
             captionText.fontSize = 16;
             captionText.color = Color.white;
             captionText.alignment = TextAnchor.MiddleLeft;
@@ -248,7 +350,7 @@ namespace GalaxyAgent.UI
             var textObj = new GameObject("Text");
             textObj.transform.SetParent(inputObj.transform, false);
             var textComp = textObj.AddComponent<Text>();
-            textComp.font = Font.CreateDynamicFontFromOSFont("Arial", 16);
+            textComp.font = SharedFont;
             textComp.fontSize = 16;
             textComp.color = Color.white;
             textComp.alignment = TextAnchor.MiddleLeft;
@@ -261,7 +363,7 @@ namespace GalaxyAgent.UI
             var phObj = new GameObject("Placeholder");
             phObj.transform.SetParent(inputObj.transform, false);
             var phComp = phObj.AddComponent<Text>();
-            phComp.font = Font.CreateDynamicFontFromOSFont("Arial", 16);
+            phComp.font = SharedFont;
             phComp.fontSize = 16;
             phComp.color = Color.gray;
             phComp.text = placeholder;

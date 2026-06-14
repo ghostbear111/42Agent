@@ -106,6 +106,10 @@ namespace GalaxyAgent.UI
 
         // 运行时子系统引用（由GameSceneController.Initialize设置）
         private TimeSystem _timeSystem;
+        private WeatherSystem _weatherSystem;
+        // 顶栏天气图标（据 WeatherSystem.CurrentWeather 切换占位图）；-1 表示尚未显示过
+        private Image _weatherIcon;
+        private WeatherType _lastDisplayedWeather = (WeatherType)(-1);
         private BaseController _baseController;
         private Dictionary<string, AgentController> _agents;
         private DatabaseManager _dbManager;
@@ -146,6 +150,7 @@ namespace GalaxyAgent.UI
         {
             UpdateTimeDisplay();
             UpdateResourceDisplay();
+            UpdateWeatherDisplay();
             UpdateAutoSave();
         }
 
@@ -180,6 +185,11 @@ namespace GalaxyAgent.UI
                 "1x", 16, new Color(0.7f, 0.8f, 1f),
                 TextAnchor.MiddleLeft, 0.22f, 0.05f, 0.32f, 0.95f);
 
+            // ---------- 天气图标（速度右侧，据当前天气切换占位图） ----------
+            _weatherIcon = RuntimeUIBuilder.CreateColorBlock("WeatherIcon", topBar.transform,
+                Color.white, 0.32f, 0.30f, 0.40f, 0.70f);
+            SpriteRegistry.ApplySpriteOrColor(_weatherIcon, SpriteRegistry.GetWeather(WeatherType.Clear));
+
             // ---------- 资源显示区域（顶栏右侧，颜色方块+数值） ----------
             // 5种资源：矿物(棕) 晶体(黄) 水(蓝) 有机(绿) 遗迹(紫)
             var resourceColors = new[]
@@ -191,20 +201,24 @@ namespace GalaxyAgent.UI
                 Constants.COLOR_RUIN      // 遗迹 - 紫色
             };
             var resourceNames = new[] { "矿物", "晶体", "水", "有机", "遗迹" };
+            // 对应 ResourceType（顺序须与 resourceColors/resourceNames 一致，供 SpriteRegistry 取图标）
+            var resourceTypes = new[] { ResourceType.Mineral, ResourceType.Crystal,
+                ResourceType.Water, ResourceType.Organic, ResourceType.RuinData };
 
             // 资源区域占顶栏右侧 0.34 ~ 1.0，每个资源占约0.13宽度
-            float resStartX = 0.34f;
-            float resWidth = 0.13f;
+            float resStartX = 0.42f;
+            float resWidth = 0.114f;
 
             for (int i = 0; i < 5; i++)
             {
                 float x0 = resStartX + i * resWidth;
                 float x1 = x0 + resWidth;
 
-                // 颜色方块（资源行左侧小方块）
-                RuntimeUIBuilder.CreateColorBlock($"ResBlock_{resourceNames[i]}",
+                // 颜色方块（资源行左侧小方块，有占位图则贴图，否则降级色块）
+                var resBlock = RuntimeUIBuilder.CreateColorBlock($"ResBlock_{resourceNames[i]}",
                     topBar.transform, resourceColors[i],
                     x0, 0.25f, x0 + 0.03f, 0.75f);
+                SpriteRegistry.ApplySpriteOrColor(resBlock, SpriteRegistry.GetResource(resourceTypes[i]));
 
                 // 资源数值文本
                 _resourceTexts[i] = RuntimeUIBuilder.CreateText($"ResText_{resourceNames[i]}",
@@ -368,7 +382,7 @@ namespace GalaxyAgent.UI
             if (_baseController != null)
             {
                 var baseAvatar = CreateAvatarButton("Avatar_Base", "基地",
-                    Constants.COLOR_BASE, SelectBase);
+                    Constants.COLOR_BASE, SelectBase, SpriteRegistry.GetBaseAvatar());
                 _baseAvatarFrame = baseAvatar.GetComponent<Image>();
             }
 
@@ -380,7 +394,7 @@ namespace GalaxyAgent.UI
                     var data = kvp.Value.AgentData;
                     var avatar = CreateAvatarButton($"Avatar_{data.AgentId}",
                         data.DisplayName, GetAgentTypeColor(data.AgentType),
-                        () => SelectAgent(data.AgentId));
+                        () => SelectAgent(data.AgentId), SpriteRegistry.GetAvatar(data.AgentType));
                     _avatarFrames[kvp.Key] = avatar.GetComponent<Image>();
                 }
             }
@@ -394,7 +408,7 @@ namespace GalaxyAgent.UI
         /// Agent头像与基地头像共用此方法。
         /// </summary>
         private GameObject CreateAvatarButton(string objName, string displayName,
-            Color blockColor, UnityAction onClick)
+            Color blockColor, UnityAction onClick, Sprite avatarSprite = null)
         {
             // 外层：Image作为外框背景与按钮点击区域，VerticalLayoutGroup排列色块和名称
             var avatar = new GameObject(objName);
@@ -424,6 +438,8 @@ namespace GalaxyAgent.UI
             blockObj.transform.SetParent(avatar.transform, false);
             var block = blockObj.AddComponent<Image>();
             block.color = blockColor;
+            // 有占位图则贴图，否则降级为类型色块
+            SpriteRegistry.ApplySpriteOrColor(block, avatarSprite);
             var blockLayout = blockObj.AddComponent<LayoutElement>();
             blockLayout.flexibleHeight = 1f;
 
@@ -529,7 +545,8 @@ namespace GalaxyAgent.UI
         /// </summary>
         public void Initialize(TimeSystem timeSystem, BaseController baseController,
             Dictionary<string, AgentController> agents, DatabaseManager dbManager,
-            SaveLoadManager saveManager, MapGenerator mapGenerator, MapConfig mapConfig)
+            SaveLoadManager saveManager, MapGenerator mapGenerator, MapConfig mapConfig,
+            WeatherSystem weatherSystem)
         {
             // 确保UI已构建（解决GameSceneController.Start先于GameHUD.Start的顺序问题）
             if (!_uiBuilt)
@@ -538,6 +555,7 @@ namespace GalaxyAgent.UI
             }
 
             _timeSystem = timeSystem;
+            _weatherSystem = weatherSystem;
             _baseController = baseController;
             _agents = agents;
             _dbManager = dbManager;
@@ -613,6 +631,19 @@ namespace GalaxyAgent.UI
         private static float GetValue(Dictionary<ResourceType, float> storage, ResourceType type)
         {
             return storage != null && storage.ContainsKey(type) ? storage[type] : 0f;
+        }
+
+        /// <summary>
+        /// 更新顶栏天气图标：仅当当前天气与上次显示不同时换 Sprite（避免每帧 Load）。
+        /// WeatherSystem 尚未注入或图标未建时跳过。
+        /// </summary>
+        private void UpdateWeatherDisplay()
+        {
+            if (_weatherSystem == null || _weatherIcon == null) return;
+            var w = _weatherSystem.CurrentWeather;
+            if (w == _lastDisplayedWeather) return;
+            _lastDisplayedWeather = w;
+            SpriteRegistry.ApplySpriteOrColor(_weatherIcon, SpriteRegistry.GetWeather(w));
         }
 
         // ==================== 按钮事件 ====================

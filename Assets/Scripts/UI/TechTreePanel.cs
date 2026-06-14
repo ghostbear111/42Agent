@@ -205,16 +205,23 @@ namespace GalaxyAgent.UI
             }
         }
 
-        /// <summary>解锁按钮回调：尝试解锁并刷新列表</summary>
+        /// <summary>解锁按钮回调：尝试解锁。成功由 TechUnlockedEvent 触发刷新，失败才手动刷新。</summary>
         private void OnUnlockClicked(string techId)
         {
             var mgr = TechTreeManager.Instance;
             if (mgr == null || _base == null) return;
             if (mgr.TryUnlock(techId, _base, out string reason))
+            {
+                // 成功：TryUnlock 已发 TechUnlockedEvent，OnTechUnlocked（面板可见时）会刷新；
+                // 此处不再重复 RefreshList，避免同帧二次重建（旧实现双重建是字体纹理崩溃的诱因之一）
                 Debug.Log($"[TechTreePanel] 解锁成功: {techId}");
+            }
             else
+            {
+                // 失败：无事件触发，状态未变，手动刷新一次以同步按钮态（如资源不足）
                 Debug.LogWarning($"[TechTreePanel] 解锁失败 {techId}: {reason}");
-            RefreshList();
+                RefreshList();
+            }
         }
 
         /// <summary>资源类型中文名（读自 ResourceConfigStore）</summary>

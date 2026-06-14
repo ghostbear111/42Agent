@@ -120,37 +120,47 @@ namespace GalaxyAgent.UI
 
             // ---------- 资源列表（每种资源一行，前有颜色方块） ----------
 
-            // 矿物 - 棕色方块
-            RuntimeUIBuilder.CreateColorBlock("MineralBlock", panelRoot.transform,
-                Constants.COLOR_MINERAL, 0.06f, 0.67f, 0.10f, 0.72f);
+            // 矿物 - 棕色方块（有占位图则贴图，否则降级为色块）
+            SpriteRegistry.ApplySpriteOrColor(
+                RuntimeUIBuilder.CreateColorBlock("MineralBlock", panelRoot.transform,
+                    Constants.COLOR_MINERAL, 0.06f, 0.67f, 0.10f, 0.72f),
+                SpriteRegistry.GetResource(ResourceType.Mineral));
             textMineral = RuntimeUIBuilder.CreateText("MineralText", panelRoot.transform,
                 "矿物: 0", 14, new Color(0.85f, 0.7f, 0.5f),
                 TextAnchor.MiddleLeft, 0.12f, 0.66f, 0.94f, 0.72f);
 
-            // 晶体 - 黄色方块
-            RuntimeUIBuilder.CreateColorBlock("CrystalBlock", panelRoot.transform,
-                Constants.COLOR_CRYSTAL, 0.06f, 0.58f, 0.10f, 0.63f);
+            // 晶体 - 黄色方块（有占位图则贴图，否则降级为色块）
+            SpriteRegistry.ApplySpriteOrColor(
+                RuntimeUIBuilder.CreateColorBlock("CrystalBlock", panelRoot.transform,
+                    Constants.COLOR_CRYSTAL, 0.06f, 0.58f, 0.10f, 0.63f),
+                SpriteRegistry.GetResource(ResourceType.Crystal));
             textCrystal = RuntimeUIBuilder.CreateText("CrystalText", panelRoot.transform,
                 "晶体: 0", 14, new Color(1f, 0.95f, 0.5f),
                 TextAnchor.MiddleLeft, 0.12f, 0.57f, 0.94f, 0.63f);
 
-            // 水 - 蓝色方块
-            RuntimeUIBuilder.CreateColorBlock("WaterBlock", panelRoot.transform,
-                Constants.COLOR_WATER, 0.06f, 0.49f, 0.10f, 0.54f);
+            // 水 - 蓝色方块（有占位图则贴图，否则降级为色块）
+            SpriteRegistry.ApplySpriteOrColor(
+                RuntimeUIBuilder.CreateColorBlock("WaterBlock", panelRoot.transform,
+                    Constants.COLOR_WATER, 0.06f, 0.49f, 0.10f, 0.54f),
+                SpriteRegistry.GetResource(ResourceType.Water));
             textWater = RuntimeUIBuilder.CreateText("WaterText", panelRoot.transform,
                 "水: 0", 14, new Color(0.5f, 0.7f, 1f),
                 TextAnchor.MiddleLeft, 0.12f, 0.48f, 0.94f, 0.54f);
 
-            // 有机物 - 绿色方块
-            RuntimeUIBuilder.CreateColorBlock("OrganicBlock", panelRoot.transform,
-                Constants.COLOR_ORGANIC, 0.06f, 0.40f, 0.10f, 0.45f);
+            // 有机物 - 绿色方块（有占位图则贴图，否则降级为色块）
+            SpriteRegistry.ApplySpriteOrColor(
+                RuntimeUIBuilder.CreateColorBlock("OrganicBlock", panelRoot.transform,
+                    Constants.COLOR_ORGANIC, 0.06f, 0.40f, 0.10f, 0.45f),
+                SpriteRegistry.GetResource(ResourceType.Organic));
             textOrganic = RuntimeUIBuilder.CreateText("OrganicText", panelRoot.transform,
                 "有机: 0", 14, new Color(0.5f, 0.9f, 0.5f),
                 TextAnchor.MiddleLeft, 0.12f, 0.39f, 0.94f, 0.45f);
 
-            // 遗迹数据 - 紫色方块
-            RuntimeUIBuilder.CreateColorBlock("RuinBlock", panelRoot.transform,
-                Constants.COLOR_RUIN, 0.06f, 0.31f, 0.10f, 0.36f);
+            // 遗迹数据 - 紫色方块（有占位图则贴图，否则降级为色块）
+            SpriteRegistry.ApplySpriteOrColor(
+                RuntimeUIBuilder.CreateColorBlock("RuinBlock", panelRoot.transform,
+                    Constants.COLOR_RUIN, 0.06f, 0.31f, 0.10f, 0.36f),
+                SpriteRegistry.GetResource(ResourceType.RuinData));
             textRuin = RuntimeUIBuilder.CreateText("RuinText", panelRoot.transform,
                 "遗迹: 0", 14, new Color(0.8f, 0.6f, 1f),
                 TextAnchor.MiddleLeft, 0.12f, 0.30f, 0.94f, 0.36f);

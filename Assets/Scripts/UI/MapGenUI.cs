@@ -59,9 +59,10 @@ namespace GalaxyAgent.UI
         {
             RuntimeUIBuilder.EnsureEventSystem();
 
-            // 背景
-            RuntimeUIBuilder.CreatePanel("BG", transform, new Color(0.04f, 0.06f, 0.12f),
+            // 背景（贴场景背景图，覆盖默认面板底纹）
+            var bg = RuntimeUIBuilder.CreatePanel("BG", transform, new Color(0.04f, 0.06f, 0.12f),
                 0f, 0f, 1f, 1f);
+            RuntimeUIBuilder.ApplySceneBackground(bg, "mapgen");
 
             // 标题
             RuntimeUIBuilder.CreateText("Title", transform, "星球环境配置", 36,

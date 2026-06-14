@@ -249,7 +249,7 @@ namespace GalaxyAgent
             // 初始化HUD
             if (gameHUD != null)
                 gameHUD.Initialize(_timeSystem, _baseController, _agents,
-                    _dbManager, _saveManager, _mapGenerator, _mapConfig);
+                    _dbManager, _saveManager, _mapGenerator, _mapConfig, _weatherSystem);
 
             Debug.Log("[GameScene] 新游戏初始化完成！");
         }
@@ -357,7 +357,7 @@ namespace GalaxyAgent
             // 初始化HUD
             if (gameHUD != null)
                 gameHUD.Initialize(_timeSystem, _baseController, _agents,
-                    _dbManager, _saveManager, _mapGenerator, _mapConfig);
+                    _dbManager, _saveManager, _mapGenerator, _mapConfig, _weatherSystem);
 
             Debug.Log($"[GameScene] 存档加载完成！第{saveData.GameDay}天, {saveData.GetFormattedPlayTime()}");
         }
