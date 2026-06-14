@@ -3,6 +3,7 @@
 /// 管理游戏内时间流逝、天数计数、昼夜循环
 /// 支持时间加速和暂停
 /// </summary>
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using UnityEngine;
@@ -11,6 +12,10 @@ namespace GalaxyAgent.World
 {
     public class TimeSystem
     {
+        // 运行时游戏配置访问（null安全回退）
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
         // 时间参数
         private DayNightMode _dayNightMode;
         private float _timeRatio; // 现实秒 → 游戏秒的转换比例
@@ -48,7 +53,7 @@ namespace GalaxyAgent.World
             if (mode == DayNightMode.EternalDay) GameHour = 12f;
             // 永夜模式时间固定在午夜
             else if (mode == DayNightMode.EternalNight) GameHour = 0f;
-            else GameHour = Constants.DAY_START_HOUR; // 交替模式从黎明开始
+            else GameHour = Cfg.World.DayStartHour; // 交替模式从黎明开始
 
             UpdateTimeOfDay();
 
@@ -120,9 +125,9 @@ namespace GalaxyAgent.World
             if (_dayNightMode == DayNightMode.EternalNight) return 0.15f;
 
             // 交替模式：根据小时计算亮度
-            if (GameHour >= Constants.DAY_START_HOUR && GameHour < Constants.NIGHT_START_HOUR)
+            if (GameHour >= Cfg.World.DayStartHour && GameHour < Cfg.World.NightStartHour)
                 return 1f; // 白天
-            if (GameHour >= Constants.NIGHT_START_HOUR || GameHour < Constants.DAY_START_HOUR)
+            if (GameHour >= Cfg.World.NightStartHour || GameHour < Cfg.World.DayStartHour)
                 return 0.2f; // 夜晚
 
             return 0.6f; // 默认

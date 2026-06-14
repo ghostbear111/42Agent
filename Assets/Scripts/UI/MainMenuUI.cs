@@ -22,6 +22,11 @@ namespace GalaxyAgent.UI
         private Transform _saveListContent;
         private Button _buttonBackFromSaves;
 
+        // 删除存档确认对话框
+        private GameObject _confirmDialog;
+        private Text _confirmMessage;
+        private string _pendingDeleteSaveId;
+
         // 数据库和存档管理器
         private DatabaseManager _dbManager;
         private SaveLoadManager _saveLoadManager;
@@ -89,26 +94,24 @@ namespace GalaxyAgent.UI
                 0.2f, 0.12f, 0.8f, 0.88f);
             _panelSaveList.SetActive(false);
 
-            // 存档列表容器
-            var contentObj = new GameObject("Content");
-            contentObj.transform.SetParent(_panelSaveList.transform, false);
-            contentObj.AddComponent<RectTransform>();
-            var vlg = contentObj.AddComponent<VerticalLayoutGroup>();
-            vlg.spacing = 5;
-            vlg.childControlWidth = true;
-            vlg.childControlHeight = true;
-            vlg.childForceExpandWidth = true;
-            vlg.childForceExpandHeight = false;
-            var cr = contentObj.GetComponent<RectTransform>();
-            cr.anchorMin = new Vector2(0.05f, 0.12f);
-            cr.anchorMax = new Vector2(0.95f, 0.92f);
-            cr.sizeDelta = Vector2.zero;
-            _saveListContent = contentObj.transform;
+            // 面板标题
+            RuntimeUIBuilder.CreateText("SaveListTitle", _panelSaveList.transform,
+                "选择存档", 26, new Color(0.7f, 0.85f, 1f),
+                TextAnchor.MiddleCenter, 0f, 0.93f, 1f, 0.99f);
+
+            // 可滚动的存档列表（返回的Content已带VerticalLayoutGroup + ContentSizeFitter，
+            // 存档过多时自动出现竖向滚动条）
+            _saveListContent = RuntimeUIBuilder.CreateScrollView("SaveScrollView",
+                _panelSaveList.transform, new Color(0.06f, 0.06f, 0.14f, 0.9f),
+                0.05f, 0.12f, 0.95f, 0.92f);
 
             // 返回按钮
             _buttonBackFromSaves = RuntimeUIBuilder.CreateButton("BtnBack", _panelSaveList.transform,
                 "返回", new Color(0.3f, 0.3f, 0.3f),
                 0.35f, 0.02f, 0.65f, 0.1f);
+
+            // 删除确认对话框（初始隐藏）
+            BuildConfirmDialog();
         }
 
         // ==================== 按钮事件 ====================
@@ -158,17 +161,138 @@ namespace GalaxyAgent.UI
 
             foreach (var save in saves)
             {
-                var btn = RuntimeUIBuilder.CreateButton($"Save_{save.SaveId}",
-                    _saveListContent,
-                    $"{save.PlanetName} | 第{save.GameDay}天 | {save.CreatedAt}",
-                    new Color(0.2f, 0.2f, 0.3f), 0f, 0f, 1f, 1f);
-                var layout = btn.gameObject.AddComponent<LayoutElement>();
-                layout.minHeight = 40;
-                string saveId = save.SaveId;
-                btn.onClick.AddListener(() => OnSaveSelected(saveId));
+                CreateSaveRow(save);
             }
 
             _panelSaveList.SetActive(true);
+
+            // 运行时构建的ScrollRect+ContentSizeFitter需要立即重建布局，
+            // 否则首帧内容高度未计算，列表可能不显示
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_saveListContent as RectTransform);
+        }
+
+        /// <summary>
+        /// 创建单个存档行：左侧"加载"按钮 + 右侧"删除"按钮
+        /// </summary>
+        private void CreateSaveRow(GameSaveData save)
+        {
+            // 行容器：水平布局
+            var row = new GameObject($"Row_{save.SaveId}");
+            row.transform.SetParent(_saveListContent, false);
+            row.AddComponent<RectTransform>();
+            var hlg = row.AddComponent<HorizontalLayoutGroup>();
+            hlg.spacing = 6;
+            hlg.childControlWidth = true;
+            hlg.childControlHeight = true;
+            hlg.childForceExpandWidth = true;
+            // 行高：必须同时设preferredHeight，否则Content的ContentSizeFitter(PreferredSize)
+            // 会把内容总高算成0，导致整个存档列表坍缩不可见（minHeight只在不滚动时生效）
+            hlg.childForceExpandHeight = true;
+            var rowLayout = row.AddComponent<LayoutElement>();
+            rowLayout.minHeight = 44;
+            rowLayout.preferredHeight = 44;
+
+            string label = $"{save.PlanetName} | 第{save.GameDay}天 | {save.CreatedAt}";
+
+            // 加载按钮（约占行宽80%）
+            var loadBtn = RuntimeUIBuilder.CreateButton($"Load_{save.SaveId}",
+                row.transform, label, new Color(0.2f, 0.2f, 0.3f), 0f, 0f, 1f, 1f);
+            var loadLayout = loadBtn.gameObject.AddComponent<LayoutElement>();
+            loadLayout.flexibleWidth = 4f; // 与删除按钮1f按4:1分配 → 约80%:20%
+            string saveId = save.SaveId;
+            loadBtn.onClick.AddListener(() => OnSaveSelected(saveId));
+
+            // 删除按钮（约占行宽20%）
+            var delBtn = RuntimeUIBuilder.CreateButton($"Del_{save.SaveId}",
+                row.transform, "删除", new Color(0.55f, 0.15f, 0.15f), 0f, 0f, 1f, 1f);
+            var delLayout = delBtn.gameObject.AddComponent<LayoutElement>();
+            delLayout.flexibleWidth = 1f;
+            string display = label;
+            delBtn.onClick.AddListener(() => RequestDeleteSave(saveId, display));
+        }
+
+        // ==================== 删除存档确认 ====================
+
+        /// <summary>
+        /// 构建删除确认对话框（全屏遮罩 + 居中确认框），初始隐藏
+        /// </summary>
+        private void BuildConfirmDialog()
+        {
+            // 全屏半透明遮罩：位于存档面板之上，阻止背景点击
+            _confirmDialog = RuntimeUIBuilder.CreatePanel("ConfirmOverlay",
+                _panelSaveList.transform, new Color(0f, 0f, 0f, 0.6f),
+                0f, 0f, 1f, 1f);
+
+            // 居中确认框
+            var box = RuntimeUIBuilder.CreatePanel("ConfirmBox", _confirmDialog.transform,
+                new Color(0.08f, 0.08f, 0.14f, 0.98f),
+                0.15f, 0.32f, 0.85f, 0.68f);
+
+            // 提示文字
+            _confirmMessage = RuntimeUIBuilder.CreateText("Msg", box.transform,
+                "确定要删除这个存档吗？\n此操作不可恢复。",
+                22, new Color(0.95f, 0.8f, 0.8f),
+                TextAnchor.MiddleCenter, 0.05f, 0.5f, 0.95f, 0.95f);
+
+            // 确认删除按钮
+            var btnConfirm = RuntimeUIBuilder.CreateButton("BtnConfirm", box.transform,
+                "确认删除", new Color(0.6f, 0.15f, 0.15f),
+                0.08f, 0.1f, 0.46f, 0.38f);
+            btnConfirm.onClick.AddListener(ConfirmDelete);
+
+            // 取消按钮
+            var btnCancel = RuntimeUIBuilder.CreateButton("BtnCancel", box.transform,
+                "取消", new Color(0.3f, 0.3f, 0.35f),
+                0.54f, 0.1f, 0.92f, 0.38f);
+            btnCancel.onClick.AddListener(CancelDelete);
+
+            _confirmDialog.SetActive(false);
+        }
+
+        /// <summary>点击删除按钮：记录待删存档ID，弹出确认对话框</summary>
+        private void RequestDeleteSave(string saveId, string displayLabel)
+        {
+            _pendingDeleteSaveId = saveId;
+            if (_confirmMessage != null)
+                _confirmMessage.text = $"确定要删除这个存档吗？\n{displayLabel}\n此操作不可恢复。";
+            if (_confirmDialog != null)
+                _confirmDialog.SetActive(true);
+        }
+
+        /// <summary>确认删除：调用SaveLoadManager删除并刷新列表</summary>
+        private void ConfirmDelete()
+        {
+            if (string.IsNullOrEmpty(_pendingDeleteSaveId)) return;
+
+            string id = _pendingDeleteSaveId;
+            _pendingDeleteSaveId = null;
+            if (_confirmDialog != null) _confirmDialog.SetActive(false);
+
+            if (_saveLoadManager != null)
+            {
+                _saveLoadManager.DeleteSave(id);
+                Debug.Log($"[MainMenu] 存档已删除: {id}");
+            }
+
+            // 刷新"加载游戏"按钮可用状态
+            UpdateLoadButtonState();
+
+            // 删除后无存档则关闭面板；否则刷新剩余列表
+            if (_saveLoadManager == null || !_saveLoadManager.HasAnySave())
+            {
+                if (_panelSaveList != null) _panelSaveList.SetActive(false);
+            }
+            else
+            {
+                ShowSaveList();
+            }
+        }
+
+        /// <summary>取消删除：隐藏对话框</summary>
+        private void CancelDelete()
+        {
+            _pendingDeleteSaveId = null;
+            if (_confirmDialog != null) _confirmDialog.SetActive(false);
         }
 
         private void OnSaveSelected(string saveId)

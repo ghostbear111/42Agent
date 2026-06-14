@@ -38,6 +38,10 @@ namespace GalaxyAgent.Data.Models
         public int GameDay;
         /// <summary>游戏内累计秒数（决定小时/昼夜）</summary>
         public float GameTimeSeconds;
+        /// <summary>该存档保存时的LLM服务地址（加载后恢复，空串表示用默认）</summary>
+        public string LlmUrl = "";
+        /// <summary>该存档保存时的LLM模型名（加载后恢复，空串表示用默认）</summary>
+        public string LlmModel = "";
 
         /// <summary>
         /// 获取地图参数的中文描述

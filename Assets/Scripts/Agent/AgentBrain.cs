@@ -22,6 +22,7 @@
 /// </summary>
 using System;
 using System.Collections.Generic;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
@@ -38,6 +39,11 @@ namespace GalaxyAgent
     /// </summary>
     public class AgentBrain
     {
+        // 运行时游戏配置访问（null安全回退）
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
+
         private readonly AgentController _controller;
         private readonly System.Random _rng = new System.Random();
 
@@ -169,7 +175,7 @@ namespace GalaxyAgent
             if (HandleUrgentRules()) return;
 
             // 事件冷却：距离上次事件触发需超过冷却时间
-            if (Time.time - _lastEventTriggerTime < Constants.LLM_EVENT_TRIGGER_COOLDOWN) return;
+            if (Time.time - _lastEventTriggerTime < Cfg.Llm.EventTriggerCooldown) return;
             _lastEventTriggerTime = Time.time;
 
             RequestHighLevelFromLLM($"重大事件:{reason}");
@@ -210,7 +216,7 @@ namespace GalaxyAgent
                 SystemPrompt = PromptBuilder.BuildSystemPrompt(),
                 UserPrompt = userPrompt,
                 Temperature = 0.7f,
-                MaxTokens = Constants.LLM_MAX_TOKENS
+                MaxTokens = Cfg.Llm.MaxTokens
             };
 
             _highLevelLLMPending = true;

@@ -320,11 +320,12 @@ namespace GalaxyAgent.Data.Enums
         ResearchCache = 4
     }
 
-    // ==================== 科技升级 ====================
+    // ==================== 科技升级（旧，已迁移） ====================
 
     /// <summary>
-    /// 科技类型
-    /// 在基地消耗资源解锁，永久提升Agent能力
+    /// 旧科技类型枚举（已废弃）。
+    /// 新科技系统改用 TechNode.Id（字符串）+ TechEffect（见 GalaxyAgent.Tech 命名空间），
+    /// 配置走 tech_tree.json。保留此枚举仅为 AgentData.TechUnlocked 旧字段的编译/反序列化兼容。
     /// </summary>
     public enum TechType
     {

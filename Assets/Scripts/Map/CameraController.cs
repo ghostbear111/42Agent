@@ -29,6 +29,12 @@ namespace GalaxyAgent.Map
         [Tooltip("滚轮缩放速度")]
         public float zoomSpeed = 5f;
 
+        [Header("跟随设置")]
+        [Tooltip("是否启用平滑跟随（关闭则瞬移到目标）")]
+        public bool smoothFollow = true;
+        [Tooltip("平滑跟随的插值速度（值越大跟随越快）")]
+        public float followDamping = 6f;
+
         // ==================== 内部状态 ====================
 
         // 拖拽相关
@@ -38,6 +44,9 @@ namespace GalaxyAgent.Map
         // 地图边界
         private float _mapMinX, _mapMaxX, _mapMinY, _mapMaxY;
         private bool _hasBounds;
+
+        // 跟随目标：非空时摄像机每帧平滑移动到目标位置（用于选中Agent后跟随）
+        private Transform _followTarget;
 
         // 摄像机引用
         private Camera _camera;
@@ -65,12 +74,50 @@ namespace GalaxyAgent.Map
             _camera = GetComponent<Camera>();
         }
 
+        // ==================== 跟随目标 ====================
+
+        /// <summary>当前是否正在跟随某个目标</summary>
+        public bool IsFollowing => _followTarget != null;
+
+        /// <summary>
+        /// 设置跟随目标（例如选中的Agent）。传入null则停止跟随。
+        /// </summary>
+        public void SetFollowTarget(Transform target)
+        {
+            _followTarget = target;
+        }
+
+        /// <summary>停止跟随目标（恢复自由视角）</summary>
+        public void ClearFollowTarget()
+        {
+            _followTarget = null;
+        }
+
         // ==================== 每帧更新 ====================
 
         private void Update()
         {
             HandleDrag();
             HandleZoom();
+        }
+
+        /// <summary>
+        /// 晚于所有Agent移动后更新摄像机位置，避免跟随抖动。
+        /// 有跟随目标时平滑移动到目标XY坐标（保持Z不变），并限制在地图边界内。
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (_followTarget == null) return;
+
+            Vector3 current = transform.position;
+            Vector3 target = new Vector3(_followTarget.position.x, _followTarget.position.y, current.z);
+
+            // 平滑跟随：用Lerp逐步逼近，避免硬切；关闭平滑则直接瞬移
+            transform.position = smoothFollow
+                ? Vector3.Lerp(current, target, followDamping * Time.deltaTime)
+                : target;
+
+            ClampCameraPosition();
         }
 
         // ==================== 拖拽平移 ====================
@@ -84,6 +131,9 @@ namespace GalaxyAgent.Map
             // 中键或右键按下 → 开始拖拽
             if (Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
             {
+                // 用户手动拖拽 → 取消跟随，交还自由视角控制权
+                _followTarget = null;
+
                 _lastMouseWorldPos = _camera.ScreenToWorldPoint(Input.mousePosition);
                 _isDragging = true;
             }

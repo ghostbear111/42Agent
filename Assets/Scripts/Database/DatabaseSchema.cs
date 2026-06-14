@@ -10,7 +10,7 @@ namespace GalaxyAgent.Database
     public static class DatabaseSchema
     {
         // 当前数据库版本
-        private const int DB_VERSION = 3;
+        private const int DB_VERSION = 5;
 
         /// <summary>
         /// 创建所有表（如果不存在）
@@ -40,6 +40,16 @@ namespace GalaxyAgent.Database
             if (!ColumnExists(connection, "saves", "game_time_seconds"))
             {
                 connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN game_time_seconds REAL NOT NULL DEFAULT 0");
+            }
+
+            // 版本迁移：LLM配置列（随存档保存/恢复当前LLM服务地址与模型）
+            if (!ColumnExists(connection, "saves", "llm_url"))
+            {
+                connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN llm_url TEXT NOT NULL DEFAULT ''");
+            }
+            if (!ColumnExists(connection, "saves", "llm_model"))
+            {
+                connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN llm_model TEXT NOT NULL DEFAULT ''");
             }
 
             // 地图区域数据
@@ -150,6 +160,15 @@ namespace GalaxyAgent.Database
                     position_y      REAL NOT NULL,
                     health          REAL NOT NULL DEFAULT 100,
                     storage_json    TEXT NOT NULL DEFAULT '{}'
+                );");
+
+            // 已解锁科技（每存档独立的科技解锁集合，P1 科技系统）
+            connection.ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS unlocked_techs (
+                    save_id         TEXT NOT NULL,
+                    tech_id         TEXT NOT NULL,
+                    unlocked_at     TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (save_id, tech_id)
                 );");
 
             // Agent长期记忆

@@ -32,6 +32,15 @@ namespace GalaxyAgent.UI
         [Tooltip("关闭按钮")]
         public Button buttonClose;
 
+        // ==================== 运行时状态 ====================
+
+        // 当前正在显示的Agent数据（引用AgentController持有的AgentData，运行时持续变化）
+        private AgentData _currentData;
+        // 显示刷新节流计时器（避免每帧字符串拼接）
+        private float _refreshTimer;
+        // 刷新间隔（秒）
+        private const float RefreshInterval = 0.2f;
+
         // ==================== 生命周期 ====================
 
         private void Start()
@@ -43,6 +52,19 @@ namespace GalaxyAgent.UI
             // 初始隐藏（如果面板已构建）
             if (panelRoot != null)
                 panelRoot.SetActive(false);
+        }
+
+        private void Update()
+        {
+            // 面板可见时持续刷新当前Agent的实时数据（生命/饥饿/能量/状态/携带/位置等）
+            if (panelRoot == null || !panelRoot.activeSelf || _currentData == null) return;
+
+            _refreshTimer -= Time.deltaTime;
+            if (_refreshTimer <= 0f)
+            {
+                _refreshTimer = RefreshInterval;
+                RefreshDisplay();
+            }
         }
 
         // ==================== 运行时UI构建 ====================
@@ -154,10 +176,26 @@ namespace GalaxyAgent.UI
         // ==================== 显示/隐藏 ====================
 
         /// <summary>
-        /// 显示指定Agent的信息
+        /// 显示指定Agent的信息（记录引用，由Update持续刷新实时数据）
         /// </summary>
         public void Show(AgentData data)
         {
+            if (data == null) return;
+
+            _currentData = data;
+            _refreshTimer = 0f; // 标记为0，让下一帧Update立即刷新一次
+            RefreshDisplay();
+
+            if (panelRoot != null) panelRoot.SetActive(true);
+        }
+
+        /// <summary>
+        /// 用当前 _currentData 刷新所有文本字段
+        /// 由 Show 首次调用，并由 Update 周期调用以反映实时变化（生命/状态/位置等）
+        /// </summary>
+        private void RefreshDisplay()
+        {
+            var data = _currentData;
             if (data == null) return;
 
             if (textName != null) textName.text = $"{data.DisplayName} ({data.AgentId})";
@@ -175,8 +213,6 @@ namespace GalaxyAgent.UI
                 textCarrying.text = $"携带: {carry}";
             }
             if (textPosition != null) textPosition.text = $"位置: ({data.Position.x:F0}, {data.Position.y:F0})";
-
-            if (panelRoot != null) panelRoot.SetActive(true);
         }
 
         /// <summary>
@@ -185,6 +221,7 @@ namespace GalaxyAgent.UI
         public void Hide()
         {
             if (panelRoot != null) panelRoot.SetActive(false);
+            _currentData = null;
         }
 
         // ==================== 辅助方法 ====================

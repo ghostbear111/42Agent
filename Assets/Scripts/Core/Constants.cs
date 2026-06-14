@@ -150,6 +150,12 @@ namespace GalaxyAgent.Core
         /// <summary>短期记忆最大条数</summary>
         public const int SHORT_TERM_MEMORY_CAPACITY = 20;
 
+        // ==================== 存档 / 自动保存 ====================
+        /// <summary>自动保存默认开启</summary>
+        public const bool AUTOSAVE_DEFAULT_ENABLED = true;
+        /// <summary>自动保存默认间隔（现实秒）</summary>
+        public const float AUTOSAVE_DEFAULT_INTERVAL = 60f;
+
         // ==================== 战斗系统 ====================
         /// <summary>攻击冷却时间（秒）</summary>
         public const float ATTACK_COOLDOWN = 1.5f;

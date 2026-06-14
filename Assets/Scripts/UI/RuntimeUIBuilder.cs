@@ -298,5 +298,115 @@ namespace GalaxyAgent.UI
             r.sizeDelta = Vector2.zero;
             return img;
         }
+
+        /// <summary>
+        /// 创建可复用的竖向滚动视图（ScrollView + Viewport + Content + 竖向滚动条）
+        /// 子项应添加到返回的Content（已带VerticalLayoutGroup + ContentSizeFitter，随内容自动增高）
+        ///
+        /// 结构：
+        ///   ScrollView(Image+ScrollRect)
+        ///     ├─ Viewport(Image+Mask)
+        ///     │    └─ Content(VerticalLayoutGroup+ContentSizeFitter) ← 返回此Transform
+        ///     └─ Scrollbar Vertical(Image+Scrollbar)
+        ///          └─ Sliding Area
+        ///               └─ Handle(Image)
+        /// </summary>
+        /// <param name="bgColor">滚动视图背景色</param>
+        /// <param name="xMin/yMin/xMax/yMax">相对父级的锚点比例（0~1）</param>
+        /// <returns>Content容器Transform，往里添加子项即可</returns>
+        public static Transform CreateScrollView(string name, Transform parent, Color bgColor,
+            float xMin, float yMin, float xMax, float yMax)
+        {
+            const float BarWidth = 16f; // 滚动条宽度
+
+            // ---- ScrollView 容器：背景 + ScrollRect ----
+            var svObj = new GameObject(name);
+            svObj.transform.SetParent(parent, false);
+            svObj.AddComponent<Image>().color = bgColor;
+            var svRect = svObj.GetComponent<RectTransform>();
+            svRect.anchorMin = new Vector2(xMin, yMin);
+            svRect.anchorMax = new Vector2(xMax, yMax);
+            svRect.sizeDelta = Vector2.zero;
+            var scrollRect = svObj.AddComponent<ScrollRect>();
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.scrollSensitivity = 30f;
+
+            // ---- Viewport：可视裁剪区域，右侧留出滚动条空间 ----
+            var vpObj = new GameObject("Viewport");
+            vpObj.transform.SetParent(svObj.transform, false);
+            var vpImg = vpObj.AddComponent<Image>();
+            vpImg.color = new Color(0f, 0f, 0f, 0f); // 透明背景
+            var vpRect = vpObj.GetComponent<RectTransform>();
+            vpRect.anchorMin = Vector2.zero;
+            vpRect.anchorMax = Vector2.one;
+            vpRect.pivot = new Vector2(0.5f, 0.5f);
+            vpRect.offsetMin = Vector2.zero;
+            vpRect.offsetMax = new Vector2(-BarWidth, 0f);
+            // 用RectMask2D按矩形裁剪：比Mask更稳健，不依赖Graphic的alpha，
+            // 避免因透明遮罩导致内容被误裁而整列表不可见
+            vpObj.AddComponent<RectMask2D>();
+
+            // ---- Content：内容容器，顶部对齐 + 随内容自动增高 ----
+            var contentObj = new GameObject("Content");
+            contentObj.transform.SetParent(vpObj.transform, false);
+            var contentRect = contentObj.AddComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = Vector2.one;
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.sizeDelta = Vector2.zero;
+            var vlg = contentObj.AddComponent<VerticalLayoutGroup>();
+            vlg.spacing = 6;
+            vlg.padding = new RectOffset(6, 6, 6, 6);
+            vlg.childControlWidth = true;
+            vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = true;
+            vlg.childForceExpandHeight = false;
+            var csf = contentObj.AddComponent<ContentSizeFitter>();
+            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            // ---- 竖向滚动条 ----
+            var sbObj = new GameObject("Scrollbar Vertical");
+            sbObj.transform.SetParent(svObj.transform, false);
+            sbObj.AddComponent<Image>().color = new Color(0.1f, 0.1f, 0.1f, 0.9f);
+            var sbRect = sbObj.GetComponent<RectTransform>();
+            sbRect.anchorMin = new Vector2(1f, 0f);
+            sbRect.anchorMax = new Vector2(1f, 1f);
+            sbRect.pivot = new Vector2(1f, 0.5f);
+            sbRect.sizeDelta = new Vector2(BarWidth, 0f);
+            var scrollbar = sbObj.AddComponent<Scrollbar>();
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+
+            // Sliding Area（手柄活动区域）
+            var saObj = new GameObject("Sliding Area");
+            saObj.transform.SetParent(sbObj.transform, false);
+            var saRect = saObj.AddComponent<RectTransform>();
+            saRect.anchorMin = Vector2.zero;
+            saRect.anchorMax = Vector2.one;
+            saRect.pivot = new Vector2(0.5f, 0.5f);
+            saRect.offsetMin = new Vector2(4f, 4f);
+            saRect.offsetMax = new Vector2(-4f, -4f);
+
+            // Handle（滑块）
+            var hObj = new GameObject("Handle");
+            hObj.transform.SetParent(saObj.transform, false);
+            var hImg = hObj.AddComponent<Image>();
+            hImg.color = new Color(0.6f, 0.6f, 0.6f, 0.9f);
+            var hRect = hObj.GetComponent<RectTransform>();
+            hRect.anchorMin = Vector2.zero;
+            hRect.anchorMax = Vector2.one;
+            hRect.pivot = new Vector2(0.5f, 0.5f);
+            hRect.sizeDelta = Vector2.zero;
+            scrollbar.handleRect = hRect;
+            scrollbar.targetGraphic = hImg;
+
+            // ---- 连接ScrollRect的引用 ----
+            scrollRect.content = contentRect;
+            scrollRect.viewport = vpRect;
+            scrollRect.verticalScrollbar = scrollbar;
+            scrollRect.verticalScrollbarSpacing = 2f;
+
+            return contentObj.transform;
+        }
     }
 }

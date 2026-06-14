@@ -13,11 +13,13 @@
 /// </summary>
 using System.Collections.Generic;
 using System.Linq;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
 using GalaxyAgent.Map;
 using GalaxyAgent.Pathfinding;
+using GalaxyAgent.Tech;
 using UnityEngine;
 
 namespace GalaxyAgent
@@ -26,6 +28,12 @@ namespace GalaxyAgent
     [RequireComponent(typeof(BoxCollider2D))]
     public class AgentController : MonoBehaviour
     {
+        // ==================== 运行时配置访问 ====================
+        // null安全：单例退出期间回退到默认配置，避免NPE
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
+
         // ==================== 核心数据 ====================
 
         /// <summary>Agent运行时数据（可序列化）</summary>
@@ -146,14 +154,14 @@ namespace GalaxyAgent
             _highLevelTimer += dt;
 
             // 中层决策（每3秒）
-            if (_decisionTimer >= Constants.MID_LEVEL_DECISION_INTERVAL)
+            if (_decisionTimer >= Cfg.Agent.MidLevelDecisionInterval)
             {
                 _decisionTimer = 0f;
                 _brain.EvaluateMidLevel();
             }
 
             // 高层决策（30-60秒）
-            if (_highLevelTimer >= Constants.HIGH_LEVEL_DECISION_MIN_INTERVAL)
+            if (_highLevelTimer >= Cfg.Agent.HighLevelMinInterval)
             {
                 _highLevelTimer = 0f;
                 _brain.RequestHighLevelDecision();
@@ -174,13 +182,11 @@ namespace GalaxyAgent
         private void UpdateStats(float dt)
         {
             // 饥饿消耗
-            AgentData.Hunger -= Constants.AGENT_HUNGER_DRAIN * dt;
+            AgentData.Hunger -= Cfg.Agent.HungerDrain * dt;
             if (AgentData.Hunger < 0) AgentData.Hunger = 0;
 
-            // 能量消耗（科技可降低消耗）
-            float energyDrain = Constants.AGENT_ENERGY_DRAIN;
-            if (AgentData.TechUnlocked.Contains(TechType.EnergyEfficiency))
-                energyDrain *= (1f - TechConfig.Get(TechType.EnergyEfficiency).BonusPercent);
+            // 能量消耗（科技可降低消耗，乘数由 TechTreeManager 聚合）
+            float energyDrain = Cfg.Agent.EnergyDrain * (TechTreeManager.Instance?.GetEnergyDrainMultiplier(AgentData) ?? 1f);
             // 天气影响能量消耗
             if (_weatherSystem != null)
             {
@@ -212,10 +218,8 @@ namespace GalaxyAgent
 
             int cx = Mathf.RoundToInt(transform.position.x);
             int cy = Mathf.RoundToInt(transform.position.y);
-            // 感知半径（科技可扩展）
-            int radius = Constants.AGENT_PERCEPTION_RADIUS;
-            if (AgentData.TechUnlocked.Contains(TechType.PerceptionBoost))
-                radius = Mathf.RoundToInt(radius * (1f + TechConfig.Get(TechType.PerceptionBoost).BonusPercent));
+            // 感知半径（科技可扩展，乘数由 TechTreeManager 聚合）
+            int radius = Mathf.RoundToInt(Cfg.Agent.PerceptionRadius * (TechTreeManager.Instance?.GetPerceptionMultiplier(AgentData) ?? 1f));
 
             // 扫描周围的瓦片
             for (int dx = -radius; dx <= radius; dx++)
@@ -233,7 +237,8 @@ namespace GalaxyAgent
                         if (tile.ResourceNodeId >= 0)
                         {
                             var res = _mapGenerator.Resources.Find(r => r.ResourceId == tile.ResourceNodeId);
-                            if (res != null && !res.IsDepleted)
+                            // 仅加入可采集的资源（Gatherable + 采集所需科技已解锁）
+                            if (res != null && !res.IsDepleted && CanGatherResource(res.ResourceType))
                                 _nearbyResources.Add(res);
                         }
 
@@ -259,6 +264,18 @@ namespace GalaxyAgent
                     _nearbyThreats.Add(threat);
                 }
             }
+        }
+
+        /// <summary>
+        /// 检查资源是否当前可采集：Gatherable 开关 + RequiredTech 已解锁（采集绑科技）。
+        /// 配置见 ResourceConfigStore（resource_config.json）。
+        /// </summary>
+        private static bool CanGatherResource(ResourceType type)
+        {
+            var cfg = ResourceConfigStore.Get(type);
+            if (!cfg.Gatherable) return false;
+            if (string.IsNullOrEmpty(cfg.RequiredTech)) return true;
+            return TechTreeManager.Instance != null && TechTreeManager.Instance.IsUnlocked(cfg.RequiredTech);
         }
 
         /// <summary>
@@ -355,10 +372,8 @@ namespace GalaxyAgent
 
             if (_gatherTimer >= _gatherDuration)
             {
-                // 采集完成：计算收获量（考虑采集效率科技加成）
-                float efficiency = AgentData.GatherEfficiency;
-                if (AgentData.TechUnlocked.Contains(TechType.GatherBoost))
-                    efficiency *= (1f + TechConfig.Get(TechType.GatherBoost).BonusPercent);
+                // 采集完成：计算收获量（考虑采集效率科技加成，乘数由 TechTreeManager 聚合）
+                float efficiency = AgentData.GatherEfficiency * (TechTreeManager.Instance?.GetGatherMultiplier(AgentData) ?? 1f);
 
                 float requested = Mathf.Min(15f * efficiency, AgentData.InventoryRemaining);
                 float gathered = _gatheringTarget.Harvest(requested);
@@ -368,7 +383,7 @@ namespace GalaxyAgent
                     AgentData.AddToInventory(_gatheringTarget.ResourceType, gathered);
 
                     // 经验
-                    bool leveled = AgentData.AddExperience(Constants.XP_GATHER_RESOURCE);
+                    bool leveled = AgentData.AddExperience(Cfg.Gather.GatherResourceXP);
 
                     EventBus.Publish(new AgentGatheredResourceEvent
                     {
@@ -411,13 +426,13 @@ namespace GalaxyAgent
                 new Vector2(_combatTarget.Position.x, _combatTarget.Position.y));
 
             // 不在攻击范围则走近
-            float atkRange = Constants.THREAT_ATTACK_RANGE;
+            float atkRange = Cfg.Combat.ThreatAttackRange;
             if (dist > atkRange)
             {
                 // 向目标移动
                 Vector2 dir = (new Vector2(_combatTarget.Position.x, _combatTarget.Position.y)
                     - (Vector2)transform.position).normalized;
-                float speed = Constants.AGENT_MOVE_SPEED * AgentData.ExploreSpeed * dt;
+                float speed = Cfg.Agent.MoveSpeed * AgentData.ExploreSpeed * dt;
                 transform.position += (Vector3)(dir * speed);
                 AgentData.CurrentTask = $"接近敌人 {_combatTarget.Name}";
                 return;
@@ -432,16 +447,14 @@ namespace GalaxyAgent
             }
 
             // === 发起攻击 ===
-            // 攻击力（含科技加成）
-            float atkPower = AgentData.AttackPower;
-            if (AgentData.TechUnlocked.Contains(TechType.AttackBoost))
-                atkPower = TechConfig.Get(TechType.AttackBoost).Apply(atkPower);
+            // 攻击力（含科技加成，乘数由 TechTreeManager 聚合）
+            float atkPower = AgentData.AttackPower * (TechTreeManager.Instance?.GetAttackMultiplier(AgentData) ?? 1f);
 
             // 伤害 = 攻击力 - 目标防御（保底1）
             float damageDealt = Mathf.Max(atkPower * 0.5f, atkPower - 2f);
 
             bool killed = _combatTarget.TakeDamage(damageDealt);
-            _attackCooldown = Constants.ATTACK_COOLDOWN;
+            _attackCooldown = Cfg.Combat.AttackCooldown;
 
             AgentData.CurrentTask = $"攻击{_combatTarget.Name} -{damageDealt:F0}伤害";
 
@@ -456,7 +469,9 @@ namespace GalaxyAgent
             // === 受到反击 ===
             if (_combatTarget.IsAlive && dist <= _combatTarget.AttackRange)
             {
-                float dmgReceived = Mathf.Max(1f, _combatTarget.Damage - AgentData.Defense * 0.3f);
+                // 防御含科技加成（DefenseMul 由 TechTreeManager 聚合）
+                float effectiveDef = AgentData.Defense * (TechTreeManager.Instance?.GetDefenseMultiplier(AgentData) ?? 1f);
+                float dmgReceived = Mathf.Max(1f, _combatTarget.Damage - effectiveDef * 0.3f);
                 AgentData.Health -= dmgReceived;
 
                 EventBus.Publish(new AgentDamagedEvent
@@ -471,7 +486,7 @@ namespace GalaxyAgent
             if (killed)
             {
                 Debug.Log($"[Agent] {AgentData.DisplayName} 击杀 {_combatTarget.Name}!");
-                bool leveled = AgentData.AddExperience(Constants.XP_KILL_THREAT);
+                bool leveled = AgentData.AddExperience(Cfg.Combat.KillThreatXP);
 
                 EventBus.Publish(new ThreatKilledEvent
                 {
@@ -552,10 +567,7 @@ namespace GalaxyAgent
 
             // 移向下一个路径点
             Vector2 target = new Vector2(_currentPath[_pathIndex].x, _currentPath[_pathIndex].y);
-            float speed = Constants.AGENT_MOVE_SPEED * AgentData.ExploreSpeed * dt;
-            // 科技加成移动速度
-            if (AgentData.TechUnlocked.Contains(TechType.SpeedBoost))
-                speed = TechConfig.Get(TechType.SpeedBoost).Apply(speed);
+            float speed = Cfg.Agent.MoveSpeed * AgentData.ExploreSpeed * dt * (TechTreeManager.Instance?.GetSpeedMultiplier(AgentData) ?? 1f);
             // 天气影响移动
             if (_weatherSystem != null)
             {
@@ -713,23 +725,15 @@ namespace GalaxyAgent
             return new Vector2Int(center, center);
         }
 
-        /// <summary>测试用：立即触发一次高层LLM决策（由GameHUD"测试决策"按钮调用，无需等30秒）</summary>
-        public void TriggerHighLevelDecisionForTest()
-        {
-            _brain?.ForceHighLevelLLMRequest();
-        }
-
         // ==================== 采集/战斗/调查的公共设置方法（由AgentBrain调用） ====================
 
         /// <summary>开始采集指定资源</summary>
         public void StartGathering(ResourceNodeData target)
         {
             _gatheringTarget = target;
-            // 采集时间 = 基础时间 × 硬度 / 采集效率
-            float efficiency = AgentData.GatherEfficiency;
-            if (AgentData.TechUnlocked.Contains(TechType.GatherBoost))
-                efficiency *= (1f + TechConfig.Get(TechType.GatherBoost).BonusPercent);
-            _gatherDuration = Constants.BASE_GATHER_TIME * target.Hardness / efficiency;
+            // 采集时间 = 基础时间 × 硬度 / 采集效率（效率越高采集越快，乘数由 TechTreeManager 聚合）
+            float efficiency = AgentData.GatherEfficiency * (TechTreeManager.Instance?.GetGatherMultiplier(AgentData) ?? 1f);
+            _gatherDuration = Cfg.Gather.BaseGatherTime * target.Hardness / efficiency;
             _gatherTimer = 0f;
             SetState(AgentState.Gathering);
         }

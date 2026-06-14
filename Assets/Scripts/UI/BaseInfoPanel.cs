@@ -43,6 +43,15 @@ namespace GalaxyAgent.UI
         [Tooltip("仓库资源文本（旧版兼容）")]
         public Text textStorage;
 
+        // ==================== 运行时状态 ====================
+
+        // 当前正在显示的基地控制器（仓库/生命等运行时持续变化）
+        private BaseController _currentBase;
+        // 显示刷新节流计时器（避免每帧字符串拼接）
+        private float _refreshTimer;
+        // 刷新间隔（秒）
+        private const float RefreshInterval = 0.2f;
+
         // ==================== 生命周期 ====================
 
         private void Start()
@@ -53,6 +62,19 @@ namespace GalaxyAgent.UI
             // 初始隐藏（如果面板已构建）
             if (panelRoot != null)
                 panelRoot.SetActive(false);
+        }
+
+        private void Update()
+        {
+            // 面板可见时持续刷新当前基地的实时数据（仓库资源/生命等）
+            if (panelRoot == null || !panelRoot.activeSelf || _currentBase == null) return;
+
+            _refreshTimer -= Time.deltaTime;
+            if (_refreshTimer <= 0f)
+            {
+                _refreshTimer = RefreshInterval;
+                RefreshDisplay();
+            }
         }
 
         // ==================== 运行时UI构建 ====================
@@ -143,6 +165,11 @@ namespace GalaxyAgent.UI
                 "位置: (--, --)", 13, new Color(0.6f, 0.6f, 0.6f),
                 TextAnchor.MiddleLeft, 0.06f, 0.19f, 0.94f, 0.24f);
 
+            // ---------- 科技树入口按钮 ----------
+            var btnTechTree = RuntimeUIBuilder.CreateButton("BtnTechTree", panelRoot.transform,
+                "科技树", new Color(0.2f, 0.4f, 0.6f), 0.2f, 0.09f, 0.8f, 0.16f);
+            btnTechTree.onClick.AddListener(OnTechTreeClicked);
+
             // 绑定关闭按钮
             if (buttonClose != null)
                 buttonClose.onClick.AddListener(Hide);
@@ -156,11 +183,27 @@ namespace GalaxyAgent.UI
         // ==================== 显示/隐藏 ====================
 
         /// <summary>
-        /// 显示基地信息
+        /// 显示基地信息（记录引用，由Update持续刷新实时数据）
         /// 支持两种模式：独立资源文本（自构建）或合并文本（Inspector赋值）
         /// </summary>
         public void Show(BaseController baseController)
         {
+            if (baseController == null) return;
+
+            _currentBase = baseController;
+            _refreshTimer = 0f; // 让下一帧Update立即刷新一次
+            RefreshDisplay();
+
+            if (panelRoot != null) panelRoot.SetActive(true);
+        }
+
+        /// <summary>
+        /// 用当前 _currentBase 刷新所有文本字段
+        /// 由 Show 首次调用，并由 Update 周期调用以反映仓库/生命的实时变化
+        /// </summary>
+        private void RefreshDisplay()
+        {
+            var baseController = _currentBase;
             if (baseController == null) return;
 
             var storage = baseController.Storage;
@@ -193,8 +236,6 @@ namespace GalaxyAgent.UI
             // 基地位置
             if (textPosition != null)
                 textPosition.text = $"位置: ({baseController.transform.position.x:F0}, {baseController.transform.position.y:F0})";
-
-            if (panelRoot != null) panelRoot.SetActive(true);
         }
 
         /// <summary>
@@ -203,6 +244,13 @@ namespace GalaxyAgent.UI
         public void Hide()
         {
             if (panelRoot != null) panelRoot.SetActive(false);
+            _currentBase = null;
+        }
+
+        /// <summary>科技树按钮：委托 GameHUD 打开科技树面板</summary>
+        private void OnTechTreeClicked()
+        {
+            GetComponentInParent<GameHUD>()?.ShowTechTree();
         }
 
         // ==================== 辅助方法 ====================

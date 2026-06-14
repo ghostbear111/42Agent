@@ -91,6 +91,32 @@ namespace GalaxyAgent.World.Base
         }
 
         /// <summary>
+        /// 检查仓库是否拥有指定的一组资源（全部满足才返回true）。供科技解锁等批量扣费预检。
+        /// </summary>
+        public bool HasEnough(Dictionary<ResourceType, float> cost)
+        {
+            if (cost == null || cost.Count == 0) return true;
+            foreach (var kvp in cost)
+            {
+                if (GetResourceAmount(kvp.Key) < kvp.Value - 0.0001f) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 一次性扣除一组资源：先预检，全部足额才扣除并返回true；任一不足则不扣，返回false。
+        /// （单线程下预检通过后逐项扣除必定足额）
+        /// </summary>
+        public bool SpendResource(Dictionary<ResourceType, float> cost)
+        {
+            if (cost == null || cost.Count == 0) return true;
+            if (!HasEnough(cost)) return false;
+            foreach (var kvp in cost)
+                WithdrawResource(kvp.Key, kvp.Value);
+            return true;
+        }
+
+        /// <summary>
         /// 鼠标点击检测
         /// </summary>
         private void OnMouseDown()

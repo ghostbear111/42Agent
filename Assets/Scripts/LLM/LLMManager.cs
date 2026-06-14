@@ -13,6 +13,7 @@
 /// </summary>
 using System;
 using System.Collections.Generic;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using UnityEngine;
 
@@ -20,6 +21,11 @@ namespace GalaxyAgent.LLM
 {
     public class LLMManager : Singleton<LLMManager>
     {
+        // 运行时游戏配置访问（null安全回退）
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
+
         // ==================== 状态 ====================
 
         /// <summary>唯一LLM客户端</summary>
@@ -61,7 +67,10 @@ namespace GalaxyAgent.LLM
         {
             base.Awake();
 
-            _client = new LLMClient();
+            // 从游戏配置读取LLM服务地址与模型（覆盖字段默认值），并用其创建客户端
+            _currentUrl = Cfg.Llm.Url;
+            _currentModel = Cfg.Llm.Model;
+            _client = new LLMClient(_currentUrl, _currentModel);
             _currentSystemPrompt = PromptBuilder.BuildSystemPrompt();
 
             // 异步检查可用性（不阻塞主线程，结果通过IsAvailable暴露）
@@ -80,7 +89,7 @@ namespace GalaxyAgent.LLM
         {
             if (string.IsNullOrEmpty(agentId)) agentId = "global";
             if (!_logs.ContainsKey(agentId))
-                _logs[agentId] = new LLMConversationLog(Constants.LLM_CONVERSATION_LOG_MAX);
+                _logs[agentId] = new LLMConversationLog(Cfg.Llm.ConversationLogMax);
             return _logs[agentId];
         }
 
@@ -144,7 +153,7 @@ namespace GalaxyAgent.LLM
                 SystemPrompt = _currentSystemPrompt,
                 UserPrompt = userText.Trim(),
                 Temperature = 0.7f,
-                MaxTokens = Constants.LLM_MAX_TOKENS
+                MaxTokens = Cfg.Llm.MaxTokens
             };
             EnqueueRequest(agentId, req, "手动对话", onComplete);
         }
@@ -156,8 +165,8 @@ namespace GalaxyAgent.LLM
         /// </summary>
         public void Configure(string url, string model)
         {
-            _currentUrl = string.IsNullOrEmpty(url) ? Constants.OLLAMA_DEFAULT_URL : url.Trim();
-            _currentModel = string.IsNullOrEmpty(model) ? Constants.OLLAMA_DEFAULT_MODEL : model.Trim();
+            _currentUrl = string.IsNullOrEmpty(url) ? Cfg.Llm.Url : url.Trim();
+            _currentModel = string.IsNullOrEmpty(model) ? Cfg.Llm.Model : model.Trim();
             _client = new LLMClient(_currentUrl, _currentModel);
             Debug.Log($"[LLMManager] 已切换LLM配置: url={_currentUrl} model={_currentModel}");
             _client.CheckAvailability(available =>

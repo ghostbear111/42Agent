@@ -75,7 +75,8 @@ namespace GalaxyAgent.Database
             _db.ExecuteQuery(
                 $"SELECT save_id, planet_name, seed, map_size, tile_size, " +
                 $"terrain_type, resource_level, risk_level, weather_type, day_night_mode, " +
-                $"created_at, play_time_seconds, game_day, game_time_seconds FROM saves WHERE save_id = '{safeId}'",
+                $"created_at, play_time_seconds, game_day, game_time_seconds, " +
+                $"llm_url, llm_model FROM saves WHERE save_id = '{safeId}'",
                 columns =>
                 {
                     save = new GameSaveData
@@ -93,9 +94,11 @@ namespace GalaxyAgent.Database
                         CreatedAt = columns[10],
                         PlayTimeSeconds = ParseFloat(columns[11]),
                         GameDay = int.Parse(columns[12]),
-                        GameTimeSeconds = columns.Length > 13 ? ParseFloat(columns[13]) : 0f
+                        GameTimeSeconds = columns.Length > 13 ? ParseFloat(columns[13]) : 0f,
+                        LlmUrl = columns.Length > 14 ? (columns[14] ?? "") : "",
+                        LlmModel = columns.Length > 15 ? (columns[15] ?? "") : ""
                     };
-                    Debug.Log($"[SaveLoadManager] 读取存档: gameDay={save.GameDay}, gameTimeSeconds={save.GameTimeSeconds:F1}, columns.Length={columns.Length}");
+                    Debug.Log($"[SaveLoadManager] 读取存档: gameDay={save.GameDay}, gameTimeSeconds={save.GameTimeSeconds:F1}, llmUrl={save.LlmUrl}, llmModel={save.LlmModel}, columns.Length={columns.Length}");
                 });
             return save;
         }
@@ -126,6 +129,7 @@ namespace GalaxyAgent.Database
             _db.ExecuteNonQuery($"DELETE FROM agent_memories WHERE save_id = '{safeId}'");
             _db.ExecuteNonQuery($"DELETE FROM procedural_memory WHERE save_id = '{safeId}'");
             _db.ExecuteNonQuery($"DELETE FROM shared_memories WHERE save_id = '{safeId}'");
+            _db.ExecuteNonQuery($"DELETE FROM unlocked_techs WHERE save_id = '{safeId}'");
             _db.ExecuteNonQuery($"DELETE FROM saves WHERE save_id = '{safeId}'");
 
             Debug.Log($"[SaveLoadManager] 存档已删除: {saveId}");
@@ -143,15 +147,16 @@ namespace GalaxyAgent.Database
             string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             string safePlanetName = DatabaseManager.Escape(config.PlanetName);
 
-            // 插入存档元数据（新游戏时game_time_seconds为0）
+            // 插入存档元数据（新游戏时game_time_seconds为0；LLM配置留空，由游戏内首次保存写入）
             _db.ExecuteNonQuery($@"
                 INSERT INTO saves (save_id, planet_name, seed, map_size, tile_size,
                     terrain_type, resource_level, risk_level, weather_type, day_night_mode,
-                    created_at, play_time_seconds, game_day, game_time_seconds)
+                    created_at, play_time_seconds, game_day, game_time_seconds,
+                    llm_url, llm_model)
                 VALUES ('{saveId}', '{safePlanetName}', {seed}, {config.MapWidth},
                     {config.PixelSize}, '{config.Terrain}', '{config.Resources}',
                     '{config.Risk}', '{config.Weather}', '{config.DayNight}',
-                    '{now}', 0, 1, 0)");
+                    '{now}', 0, 1, 0, '', '')");
 
             // 保存资源节点
             foreach (var res in mapGenerator.Resources)
@@ -283,9 +288,11 @@ namespace GalaxyAgent.Database
         /// <summary>
         /// 保存当前游戏状态
         /// </summary>
+        /// <param name="llmUrl">当前LLM服务地址（随存档保存，加载后恢复）</param>
+        /// <param name="llmModel">当前LLM模型名（随存档保存，加载后恢复）</param>
         public void SaveGame(string saveId, AgentData[] agents, Vector2 basePosition,
             float playTime, int gameDay, Dictionary<ResourceType, float> baseStorage,
-            float gameTimeSeconds = 0f)
+            float gameTimeSeconds = 0f, string llmUrl = "", string llmModel = "")
         {
             if (string.IsNullOrEmpty(saveId))
             {
@@ -293,12 +300,15 @@ namespace GalaxyAgent.Database
                 return;
             }
 
-            // 更新存档元数据（包含游戏内时间秒数，决定加载后的昼夜时刻）
+            // 更新存档元数据（包含游戏内时间秒数，决定加载后的昼夜时刻；
+            // 以及当前LLM配置，便于加载后恢复相同的服务地址与模型）
             _db.ExecuteNonQuery($@"
                 UPDATE saves SET
                     play_time_seconds = {playTime},
                     game_day = {gameDay},
-                    game_time_seconds = {gameTimeSeconds}
+                    game_time_seconds = {gameTimeSeconds},
+                    llm_url = '{DatabaseManager.Escape(llmUrl ?? "")}',
+                    llm_model = '{DatabaseManager.Escape(llmModel ?? "")}'
                 WHERE save_id = '{DatabaseManager.Escape(saveId)}'");
 
             Debug.Log($"[SaveLoadManager] 保存时间数据: gameDay={gameDay}, gameTimeSeconds={gameTimeSeconds:F1}, playTime={playTime:F1}");
@@ -318,7 +328,41 @@ namespace GalaxyAgent.Database
                     storage_json = '{DatabaseManager.Escape(storageJson)}'
                 WHERE save_id = '{DatabaseManager.Escape(saveId)}'");
 
+            // 持久化已解锁科技集合（先清后写，保持与当前内存集合一致）
+            _db.ExecuteNonQuery($"DELETE FROM unlocked_techs WHERE save_id = '{DatabaseManager.Escape(saveId)}'");
+            var unlocked = GalaxyAgent.Tech.TechTreeManager.Instance != null
+                ? GalaxyAgent.Tech.TechTreeManager.Instance.GetUnlockedForSave()
+                : null;
+            if (unlocked != null)
+            {
+                string now = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                foreach (var techId in unlocked)
+                {
+                    if (string.IsNullOrEmpty(techId)) continue;
+                    _db.ExecuteNonQuery(
+                        $"INSERT INTO unlocked_techs (save_id, tech_id, unlocked_at) VALUES (" +
+                        $"'{DatabaseManager.Escape(saveId)}', '{DatabaseManager.Escape(techId)}', '{now}')");
+                }
+            }
+
             Debug.Log($"[SaveLoadManager] 游戏已保存: {saveId} (第{gameDay}天, {playTime:F0}秒)");
+        }
+
+        /// <summary>
+        /// 加载已解锁科技集合（加载存档时调用，恢复 TechTreeManager 解锁状态）
+        /// </summary>
+        public List<string> LoadUnlockedTechs(string saveId)
+        {
+            var ids = new List<string>();
+            string safeId = DatabaseManager.Escape(saveId);
+            _db.ExecuteQuery(
+                $"SELECT tech_id FROM unlocked_techs WHERE save_id = '{safeId}'",
+                columns =>
+                {
+                    if (columns != null && columns.Length > 0 && !string.IsNullOrEmpty(columns[0]))
+                        ids.Add(columns[0]);
+                });
+            return ids;
         }
 
         /// <summary>

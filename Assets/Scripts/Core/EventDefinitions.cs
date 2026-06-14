@@ -213,13 +213,11 @@ namespace GalaxyAgent.Core
 
     // ==================== 科技/升级事件 ====================
 
-    /// <summary>科技解锁事件</summary>
+    /// <summary>科技解锁事件（基地消耗资源解锁某科技节点后发布，供 UI 刷新）</summary>
     public class TechUnlockedEvent : IEvent
     {
-        /// <summary>解锁科技的Agent ID</summary>
-        public string AgentId;
-        /// <summary>解锁的科技类型</summary>
-        public TechType TechType;
+        /// <summary>解锁的科技节点 Id</summary>
+        public string TechId;
     }
 
     /// <summary>Agent升级事件</summary>

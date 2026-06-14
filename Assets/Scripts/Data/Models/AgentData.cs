@@ -5,6 +5,7 @@
 /// </summary>
 using System.Collections.Generic;
 using System.Linq;
+using GalaxyAgent.Config;
 using GalaxyAgent.Data.Enums;
 using UnityEngine;
 
@@ -13,6 +14,11 @@ namespace GalaxyAgent.Data.Models
     [System.Serializable]
     public class AgentData
     {
+        // 运行时游戏配置访问（null安全：单例退出期间回退到默认配置）
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
+
         // ==================== 基础属性 ====================
 
         /// <summary>Agent唯一标识（如 "scout_01"）</summary>
@@ -61,8 +67,12 @@ namespace GalaxyAgent.Data.Models
         /// <summary>当前背包总重量</summary>
         public float InventoryWeight => Inventory.Values.Sum();
 
-        /// <summary>背包剩余空间</summary>
-        public float InventoryRemaining => MaxCarry - InventoryWeight;
+        /// <summary>含 CarryBoost 科技加成的有效携带上限（解锁即生效，乘数由 TechTreeManager 聚合）</summary>
+        public float EffectiveMaxCarry => MaxCarry * (GalaxyAgent.Tech.TechTreeManager.Instance != null
+            ? GalaxyAgent.Tech.TechTreeManager.Instance.GetCarryMultiplier(this) : 1f);
+
+        /// <summary>背包剩余空间（基于含科技加成的有效上限）</summary>
+        public float InventoryRemaining => EffectiveMaxCarry - InventoryWeight;
 
         // ==================== 旧字段（兼容） ====================
 
@@ -76,8 +86,9 @@ namespace GalaxyAgent.Data.Models
         /// <summary>经验值（采集+1，调查+5，击杀+10）</summary>
         public float Experience;
         /// <summary>升级所需经验值</summary>
-        public float ExperienceToLevel => Level * 100f;
-        /// <summary>已解锁的科技列表</summary>
+        public float ExperienceToLevel => Level * Cfg.Combat.XpPerLevel;
+        /// <summary>已解锁的科技列表（已废弃：科技解锁状态改由 TechTreeManager 统一管理，保留仅为旧存档反序列化兼容）</summary>
+        [System.Obsolete("科技解锁改由 TechTreeManager 管理，请勿读写此字段")]
         public List<TechType> TechUnlocked = new List<TechType>();
 
         // ==================== 背包操作 ====================
@@ -170,8 +181,8 @@ namespace GalaxyAgent.Data.Models
             {
                 Experience -= ExperienceToLevel;
                 Level++;
-                // 升级奖励：恢复20%生命和能量
-                Health = Mathf.Min(Health + MaxHealth * 0.2f, MaxHealth);
+                // 升级奖励：恢复生命(比例可配置)和能量
+                Health = Mathf.Min(Health + MaxHealth * Cfg.Combat.LevelUpHealPercent, MaxHealth);
                 Energy = Mathf.Min(Energy + 20f, 100f);
                 return true;
             }
@@ -190,11 +201,11 @@ namespace GalaxyAgent.Data.Models
                 AgentId = id,
                 AgentType = type,
                 Position = spawnPosition,
-                MaxHealth = 100f,
-                Health = 100f,
-                Hunger = 100f,
-                Energy = 100f,
-                MaxCarry = 50f,
+                MaxHealth = Cfg.Agent.MaxHealth,
+                Health = Cfg.Agent.MaxHealth,
+                Hunger = Cfg.Agent.MaxHunger,
+                Energy = Cfg.Agent.MaxEnergy,
+                MaxCarry = Cfg.Agent.MaxCarry,
                 CurrentState = AgentState.Idle,
                 CurrentTask = "待命中"
             };

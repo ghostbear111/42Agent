@@ -5,6 +5,7 @@
 /// 当场景加载时（新游戏/加载游戏）自动执行初始化流程
 /// </summary>
 using System.Collections.Generic;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
@@ -12,6 +13,7 @@ using GalaxyAgent.Database;
 using GalaxyAgent.LLM;
 using GalaxyAgent.Map;
 using GalaxyAgent.Memory;
+using GalaxyAgent.Tech;
 using GalaxyAgent.UI;
 using GalaxyAgent.World;
 using GalaxyAgent.World.Base;
@@ -216,9 +218,12 @@ namespace GalaxyAgent
             // 创建基地
             CreateBase(basePos);
 
+            // 触发科技树单例初始化（Awake 加载 tech_tree.json，新游戏解锁集合默认空）
+            _ = TechTreeManager.Instance;
+
             // 初始化时间系统
             _timeSystem = new TimeSystem();
-            _timeSystem.Initialize(config.DayNight);
+            _timeSystem.Initialize(config.DayNight, GameConfigManager.Instance.Config.World.TimeRatio);
 
             // 初始化天气系统
             _weatherSystem = new WeatherSystem();
@@ -304,6 +309,9 @@ namespace GalaxyAgent
             if (_baseController != null)
                 _baseController.Storage = storage;
 
+            // 恢复已解锁科技集合
+            TechTreeManager.Instance.RestoreUnlocked(_saveManager.LoadUnlockedTechs(saveId));
+
             // 加载Agent
             var agentStates = _saveManager.LoadAgentStates(saveId);
             foreach (var agentData in agentStates)
@@ -313,7 +321,7 @@ namespace GalaxyAgent
 
             // 初始化时间系统（从存档恢复游戏内时间，保持昼夜时刻正确）
             _timeSystem = new TimeSystem();
-            _timeSystem.Initialize(saveData.DayNightMode);
+            _timeSystem.Initialize(saveData.DayNightMode, GameConfigManager.Instance.Config.World.TimeRatio);
             _timeSystem.LoadFromSave(saveData.GameDay, saveData.GameTimeSeconds, saveData.PlayTimeSeconds);
 
             Debug.Log($"[GameScene] 时间恢复: 第{_timeSystem.GameDay}天 {_timeSystem.GetTimeString()}, gameTimeSec={saveData.GameTimeSeconds:F1}");
@@ -325,6 +333,13 @@ namespace GalaxyAgent
             // 初始化记忆系统
             _memoryManager = new MemoryManager();
             _memoryManager.Initialize(_dbManager, saveId);
+
+            // 恢复存档保存时的LLM配置（服务地址+模型），空串则保持默认配置不变
+            if (!string.IsNullOrEmpty(saveData.LlmUrl) || !string.IsNullOrEmpty(saveData.LlmModel))
+            {
+                LLMManager.Instance?.Configure(saveData.LlmUrl, saveData.LlmModel);
+                Debug.Log($"[GameScene] 已恢复LLM配置: url={saveData.LlmUrl}, model={saveData.LlmModel}");
+            }
 
             // 设置摄像机
             if (_baseController != null)

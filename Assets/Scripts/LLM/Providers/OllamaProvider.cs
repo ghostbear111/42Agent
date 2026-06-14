@@ -6,6 +6,7 @@
 using System;
 using System.Collections;
 using System.Text;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -19,6 +20,11 @@ namespace GalaxyAgent.LLM.Providers
         private readonly float _timeout;
         private bool _isCancelled;
 
+        // 运行时游戏配置访问（null安全回退）：构造时未显式传参则用配置中的LLM默认值
+        private static readonly GameConfig _fallbackConfig = new GameConfig();
+        private static GameConfig Cfg => GameConfigManager.Instance != null
+            ? GameConfigManager.Instance.Config : _fallbackConfig;
+
         public string ProviderName => "Ollama";
 
         /// <summary>
@@ -29,9 +35,9 @@ namespace GalaxyAgent.LLM.Providers
         /// <param name="timeout">超时时间（秒）</param>
         public OllamaProvider(string baseUrl = null, string defaultModel = null, float timeout = 0)
         {
-            _baseUrl = baseUrl ?? Constants.OLLAMA_DEFAULT_URL;
-            _defaultModel = defaultModel ?? Constants.OLLAMA_DEFAULT_MODEL;
-            _timeout = timeout > 0 ? timeout : Constants.LLM_REQUEST_TIMEOUT;
+            _baseUrl = baseUrl ?? Cfg.Llm.Url;
+            _defaultModel = defaultModel ?? Cfg.Llm.Model;
+            _timeout = timeout > 0 ? timeout : Cfg.Llm.RequestTimeout;
         }
 
         /// <summary>

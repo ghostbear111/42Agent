@@ -17,14 +17,17 @@
 /// └─────────────────────────────────────────────────┘
 /// </summary>
 using System.Collections.Generic;
+using GalaxyAgent.Config;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
 using GalaxyAgent.Database;
+using GalaxyAgent.LLM;
 using GalaxyAgent.Map;
 using GalaxyAgent.World;
 using GalaxyAgent.World.Base;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 namespace GalaxyAgent.UI
@@ -58,8 +61,8 @@ namespace GalaxyAgent.UI
         public Button buttonSpeed5x;
         [Tooltip("LLM对话查看按钮")]
         public Button buttonLLMChat;
-        [Tooltip("测试决策按钮（立即触发高层LLM决策）")]
-        public Button buttonTestDecision;
+        [Tooltip("游戏配置按钮（打开运行时配置面板）")]
+        public Button buttonConfig;
 
         [Header("信息面板")]
         [Tooltip("Agent信息面板")]
@@ -75,6 +78,31 @@ namespace GalaxyAgent.UI
         private bool _uiBuilt = false;
         // LLM对话查看窗口
         private LLMConversationWindow _llmWindow;
+        // 游戏配置运行时面板
+        private GameConfigPanel _configPanel;
+        // 科技树面板（基地"科技树"按钮入口）
+        private TechTreePanel _techTreePanel;
+        // 自动保存状态文本（底栏中部，显示开关/倒计时/上次保存时间）
+        private Text _autoSaveText;
+        // 距离下次自动保存的倒计时（现实秒）
+        private float _autoSaveTimer = 0f;
+        // 上次自动/手动保存时的游戏天数（用于显示）
+        private int _lastSaveDay = 0;
+
+        // Agent头像选择条：顶栏下方左上角，点击头像可选中Agent并让摄像机跟随
+        private GameObject _agentBar;
+        // AgentId → 头像外框Image（用于切换选中高亮）
+        private readonly Dictionary<string, Image> _avatarFrames = new Dictionary<string, Image>();
+        // 基地头像外框Image（与Agent头像一起放在选择条末尾）
+        private Image _baseAvatarFrame;
+        // 当前选中的AgentId
+        private string _selectedAgentId;
+        // 摄像机控制器（选中Agent后让其跟随目标）
+        private CameraController _cameraController;
+
+        // 头像外框颜色：未选中(深色) / 选中(亮黄)
+        private static readonly Color AvatarFrameNormal = new Color(0.15f, 0.15f, 0.2f, 0.95f);
+        private static readonly Color AvatarFrameSelected = new Color(1f, 0.82f, 0.2f, 1f);
 
         // 运行时子系统引用（由GameSceneController.Initialize设置）
         private TimeSystem _timeSystem;
@@ -103,18 +131,22 @@ namespace GalaxyAgent.UI
             if (buttonSpeed2x != null) buttonSpeed2x.onClick.AddListener(() => SetSpeed(2f));
             if (buttonSpeed5x != null) buttonSpeed5x.onClick.AddListener(() => SetSpeed(5f));
             if (buttonLLMChat != null) buttonLLMChat.onClick.AddListener(ToggleLLMWindow);
-            if (buttonTestDecision != null) buttonTestDecision.onClick.AddListener(OnTestDecisionClicked);
+            if (buttonConfig != null) buttonConfig.onClick.AddListener(ToggleConfigPanel);
 
             // 订阅事件
             EventBus.Subscribe<AgentClickedEvent>(OnAgentClicked);
             EventBus.Subscribe<BaseClickedEvent>(OnBaseClicked);
             EventBus.Subscribe<MapClickedEvent>(OnMapClicked);
+
+            // 自动保存倒计时初始化（间隔从配置读取，Update中循环）
+            _autoSaveTimer = GetAutoSaveInterval();
         }
 
         private void Update()
         {
             UpdateTimeDisplay();
             UpdateResourceDisplay();
+            UpdateAutoSave();
         }
 
         // ==================== 运行时UI构建 ====================
@@ -181,6 +213,11 @@ namespace GalaxyAgent.UI
                     TextAnchor.MiddleLeft, x0 + 0.035f, 0.05f, x1, 0.95f);
             }
 
+            // ==================== Agent头像选择条 ====================
+            // 挂在顶栏下方，水平排列各Agent头像。
+            // 头像在Initialize()时根据实际Agent填充（BuildUI先于Agent创建执行）。
+            CreateAgentBar(topBar);
+
             // ==================== 底栏 ====================
             // 速度控制按钮 + 保存/返回按钮，anchor(0, 0) ~ (1, 0.08)
             var bottomBar = RuntimeUIBuilder.CreatePanel("BottomBar", transform,
@@ -204,6 +241,21 @@ namespace GalaxyAgent.UI
                 "5x", new Color(0.2f, 0.4f, 0.6f),
                 0.27f, 0.1f, 0.34f, 0.9f);
 
+            // 游戏配置按钮（底栏左侧空白区，打开运行时配置面板）
+            buttonConfig = RuntimeUIBuilder.CreateButton("BtnConfig", bottomBar.transform,
+                "配置", new Color(0.3f, 0.35f, 0.2f),
+                0.35f, 0.1f, 0.45f, 0.9f);
+
+            // LLM对话查看按钮（配置右侧，紫色标识）
+            buttonLLMChat = RuntimeUIBuilder.CreateButton("BtnLLMChat", bottomBar.transform,
+                "LLM对话", new Color(0.35f, 0.25f, 0.55f),
+                0.46f, 0.1f, 0.58f, 0.9f);
+
+            // 自动保存状态文本（底栏中部，显示开关/倒计时/上次保存游戏天数）
+            _autoSaveText = RuntimeUIBuilder.CreateText("AutoSaveStatus", bottomBar.transform,
+                "自动保存: --", 12, new Color(0.7f, 0.75f, 0.6f),
+                TextAnchor.MiddleCenter, 0.59f, 0.1f, 0.71f, 0.9f);
+
             // 操作按钮（底栏右侧）
             buttonSave = RuntimeUIBuilder.CreateButton("BtnSave", bottomBar.transform,
                 "保存", new Color(0.15f, 0.45f, 0.25f),
@@ -213,16 +265,6 @@ namespace GalaxyAgent.UI
                 "返回菜单", new Color(0.5f, 0.15f, 0.15f),
                 0.85f, 0.1f, 0.99f, 0.9f);
 
-            // LLM对话查看按钮（底栏中部空白区，紫色标识）
-            buttonLLMChat = RuntimeUIBuilder.CreateButton("BtnLLMChat", bottomBar.transform,
-                "LLM对话", new Color(0.35f, 0.25f, 0.55f),
-                0.58f, 0.1f, 0.70f, 0.9f);
-
-            // 测试决策按钮（立即触发所有Agent高层LLM决策，便于快速观察，无需等30秒）
-            buttonTestDecision = RuntimeUIBuilder.CreateButton("BtnTestDecision", bottomBar.transform,
-                "测试决策", new Color(0.7f, 0.5f, 0.15f),
-                0.46f, 0.1f, 0.57f, 0.9f);
-
             // ==================== LLM对话查看窗口 ====================
             // 运行时自构建，初始隐藏，点击"LLM对话"按钮切换显示
             // 注意：中间层容器必须用RectTransform撑满父级，否则普通Transform在Canvas下无尺寸，
@@ -230,6 +272,12 @@ namespace GalaxyAgent.UI
             var llmWindowObj = MakeFullScreenContainer("LLMConversationWindow", transform);
             _llmWindow = llmWindowObj.AddComponent<LLMConversationWindow>();
             _llmWindow.BuildUI(llmWindowObj.transform);
+
+            // ==================== 游戏配置运行时面板 ====================
+            // 点击"配置"按钮切换显示，编辑后保存到 game_config.json 并即时生效
+            var configPanelObj = MakeFullScreenContainer("GameConfigPanel", transform);
+            _configPanel = configPanelObj.AddComponent<GameConfigPanel>();
+            _configPanel.BuildUI(configPanelObj.transform);
 
             // ==================== 侧边信息面板区域 ====================
             // Agent信息面板和基地信息面板共享右侧区域，同时只显示一个
@@ -244,6 +292,11 @@ namespace GalaxyAgent.UI
             var basePanelObj = MakeFullScreenContainer("BaseInfoPanel", transform);
             baseInfoPanel = basePanelObj.AddComponent<BaseInfoPanel>();
             baseInfoPanel.BuildUI(basePanelObj.transform);
+
+            // 科技树面板（基地"科技树"按钮入口，初始隐藏）
+            var techPanelObj = MakeFullScreenContainer("TechTreePanel", transform);
+            _techTreePanel = techPanelObj.AddComponent<TechTreePanel>();
+            _techTreePanel.BuildUI(techPanelObj.transform);
 
             Debug.Log("[GameHUD] UI构建完成");
         }
@@ -262,6 +315,210 @@ namespace GalaxyAgent.UI
             rt.offsetMin = Vector2.zero;
             rt.offsetMax = Vector2.zero;
             return obj;
+        }
+
+        // ==================== Agent头像选择条 ====================
+
+        /// <summary>
+        /// 创建头像选择条容器（空），挂在顶栏下方，按内容横向自适应宽度。
+        /// 实际头像在Initialize()中由PopulateAgentBar()填充。
+        /// 挂在顶栏下作为子物体，锚定顶栏左下角向下延伸，任意分辨率都紧贴顶栏下方。
+        /// </summary>
+        private void CreateAgentBar(GameObject topBar)
+        {
+            var barObj = new GameObject("AgentBar");
+            barObj.transform.SetParent(topBar.transform, false);
+            var br = barObj.AddComponent<RectTransform>();
+
+            // 锚定顶栏左下角，pivot设为左上 → 头像条从顶栏底部向下、向右延伸
+            br.anchorMin = new Vector2(0f, 0f);
+            br.anchorMax = new Vector2(0f, 0f);
+            br.pivot = new Vector2(0f, 1f);
+            br.anchoredPosition = new Vector2(8f, -8f);
+
+            // 水平布局 + 随内容自适应宽高
+            var hlg = barObj.AddComponent<HorizontalLayoutGroup>();
+            hlg.spacing = 8;
+            hlg.padding = new RectOffset(0, 0, 0, 0);
+            hlg.childControlWidth = true;
+            hlg.childControlHeight = true;
+            hlg.childForceExpandWidth = false;
+            hlg.childForceExpandHeight = false;
+            hlg.childAlignment = TextAnchor.UpperLeft;
+            var csf = barObj.AddComponent<ContentSizeFitter>();
+            csf.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            _agentBar = barObj;
+        }
+
+        /// <summary>
+        /// 根据当前所有Agent(及基地)填充头像（清空后重建）
+        /// </summary>
+        private void PopulateAgentBar()
+        {
+            if (_agentBar == null) return;
+
+            _avatarFrames.Clear();
+            _baseAvatarFrame = null;
+            foreach (Transform child in _agentBar.transform)
+                Destroy(child.gameObject);
+
+            // 基地头像（排在最左，白底）—— 放在所有Agent头像之前
+            if (_baseController != null)
+            {
+                var baseAvatar = CreateAvatarButton("Avatar_Base", "基地",
+                    Constants.COLOR_BASE, SelectBase);
+                _baseAvatarFrame = baseAvatar.GetComponent<Image>();
+            }
+
+            // Agent头像（基地之后，Agent之间相对顺序不变）
+            if (_agents != null)
+            {
+                foreach (var kvp in _agents)
+                {
+                    var data = kvp.Value.AgentData;
+                    var avatar = CreateAvatarButton($"Avatar_{data.AgentId}",
+                        data.DisplayName, GetAgentTypeColor(data.AgentType),
+                        () => SelectAgent(data.AgentId));
+                    _avatarFrames[kvp.Key] = avatar.GetComponent<Image>();
+                }
+            }
+
+            // 运行时构建后强制立即重建布局，确保头像条首帧就显示正确尺寸
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_agentBar.transform as RectTransform);
+        }
+
+        /// <summary>
+        /// 创建单个头像：外框(选中高亮) + 色块 + 名称，整体可点击。
+        /// Agent头像与基地头像共用此方法。
+        /// </summary>
+        private GameObject CreateAvatarButton(string objName, string displayName,
+            Color blockColor, UnityAction onClick)
+        {
+            // 外层：Image作为外框背景与按钮点击区域，VerticalLayoutGroup排列色块和名称
+            var avatar = new GameObject(objName);
+            avatar.transform.SetParent(_agentBar.transform, false);
+            avatar.AddComponent<RectTransform>();
+
+            var frame = avatar.AddComponent<Image>();
+            frame.color = AvatarFrameNormal;
+
+            var vlg = avatar.AddComponent<VerticalLayoutGroup>();
+            vlg.spacing = 2;
+            vlg.padding = new RectOffset(5, 5, 5, 5);
+            vlg.childControlWidth = true;
+            vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = true;
+            vlg.childForceExpandHeight = true;
+            vlg.childAlignment = TextAnchor.UpperCenter;
+
+            var avatarLayout = avatar.AddComponent<LayoutElement>();
+            avatarLayout.preferredWidth = 96;
+            avatarLayout.preferredHeight = 96;
+            avatarLayout.minWidth = 96;
+            avatarLayout.minHeight = 96;
+
+            // 色块（占主体高度）
+            var blockObj = new GameObject("ColorBlock");
+            blockObj.transform.SetParent(avatar.transform, false);
+            var block = blockObj.AddComponent<Image>();
+            block.color = blockColor;
+            var blockLayout = blockObj.AddComponent<LayoutElement>();
+            blockLayout.flexibleHeight = 1f;
+
+            // 名称（固定高度）
+            var nameText = RuntimeUIBuilder.CreateText("Name", avatar.transform,
+                displayName, 13, Color.white, TextAnchor.MiddleCenter);
+            var nameLayout = nameText.gameObject.AddComponent<LayoutElement>();
+            nameLayout.preferredHeight = 20;
+            nameLayout.minHeight = 20;
+            nameLayout.flexibleHeight = 0f;
+
+            // 按钮交互
+            var btn = avatar.AddComponent<Button>();
+            btn.targetGraphic = frame;
+            btn.onClick.AddListener(onClick);
+
+            return avatar;
+        }
+
+        /// <summary>
+        /// 清除所有头像高亮（Agent头像 + 基地头像）恢复为未选中色
+        /// </summary>
+        private void ClearAllHighlights()
+        {
+            foreach (var kvp in _avatarFrames)
+            {
+                if (kvp.Value != null) kvp.Value.color = AvatarFrameNormal;
+            }
+            if (_baseAvatarFrame != null) _baseAvatarFrame.color = AvatarFrameNormal;
+        }
+
+        /// <summary>
+        /// 选中指定Agent：高亮头像 + 显示信息面板 + 摄像机跟随
+        /// </summary>
+        private void SelectAgent(string agentId)
+        {
+            _selectedAgentId = agentId;
+
+            // 更新头像高亮（仅当前Agent高亮）
+            ClearAllHighlights();
+            if (_avatarFrames.TryGetValue(agentId, out var frame) && frame != null)
+                frame.color = AvatarFrameSelected;
+
+            if (_agents == null || !_agents.TryGetValue(agentId, out var controller)) return;
+
+            // 显示Agent信息面板，隐藏基地面板
+            if (baseInfoPanel != null) baseInfoPanel.Hide();
+            if (agentInfoPanel != null) agentInfoPanel.Show(controller.AgentData);
+
+            // 摄像机跟随该Agent
+            if (_cameraController != null)
+                _cameraController.SetFollowTarget(controller.transform);
+        }
+
+        /// <summary>
+        /// 选中基地：高亮基地头像 + 显示基地信息面板 + 摄像机移到基地
+        /// </summary>
+        private void SelectBase()
+        {
+            _selectedAgentId = null;
+
+            ClearAllHighlights();
+            if (_baseAvatarFrame != null) _baseAvatarFrame.color = AvatarFrameSelected;
+
+            // 显示基地信息面板，隐藏Agent面板
+            if (agentInfoPanel != null) agentInfoPanel.Hide();
+            if (baseInfoPanel != null && _baseController != null)
+                baseInfoPanel.Show(_baseController);
+
+            // 摄像机移到基地（基地静止，即镜头居中基地）
+            if (_cameraController != null && _baseController != null)
+                _cameraController.SetFollowTarget(_baseController.transform);
+        }
+
+        /// <summary>
+        /// 取消选中：清除所有头像高亮 + 摄像机恢复自由视角
+        /// </summary>
+        private void DeselectAgent()
+        {
+            _selectedAgentId = null;
+            ClearAllHighlights();
+            if (_cameraController != null)
+                _cameraController.ClearFollowTarget();
+        }
+
+        /// <summary>Agent类型对应的标识色（与AgentController保持一致）</summary>
+        private static Color GetAgentTypeColor(AgentType type)
+        {
+            return type switch
+            {
+                AgentType.Scout => Constants.COLOR_AGENT_SCOUT,
+                AgentType.Worker => Constants.COLOR_AGENT_WORKER,
+                AgentType.Guard => Constants.COLOR_AGENT_GUARD,
+                _ => Color.gray
+            };
         }
 
         // ==================== 初始化（由GameSceneController调用） ====================
@@ -288,11 +545,18 @@ namespace GalaxyAgent.UI
             _mapGenerator = mapGenerator;
             _mapConfig = mapConfig;
 
+            // 获取摄像机控制器引用（用于选中Agent后跟随）
+            var cam = Camera.main;
+            _cameraController = cam != null ? cam.GetComponent<CameraController>() : null;
+
             // 把所有AgentId注入LLM对话窗口，供左侧选择查看
             if (_llmWindow != null && _agents != null)
             {
                 _llmWindow.SetAgentIds(new List<string>(_agents.Keys));
             }
+
+            // 填充头像选择条（此时_agents已知）
+            PopulateAgentBar();
 
             Debug.Log("[GameHUD] 初始化完成，子系统已连接");
         }
@@ -324,15 +588,14 @@ namespace GalaxyAgent.UI
             if (_baseController == null) return;
             var storage = _baseController.Storage;
 
-            // 优先使用独立资源文本（自构建模式）
+            // 优先使用独立资源文本（自构建模式）—— 资源名读自 ResourceConfigStore（resource_config.json）
             if (_resourceTexts[0] != null)
             {
                 var types = new[] { ResourceType.Mineral, ResourceType.Crystal, ResourceType.Water, ResourceType.Organic, ResourceType.RuinData };
-                var names = new[] { "矿物", "晶体", "水", "有机", "遗迹" };
                 for (int i = 0; i < 5; i++)
                 {
                     if (_resourceTexts[i] != null)
-                        _resourceTexts[i].text = $"{names[i]}:{GetValue(storage, types[i]):F0}";
+                        _resourceTexts[i].text = $"{GalaxyAgent.Tech.ResourceConfigStore.GetDisplayName(types[i])}:{GetValue(storage, types[i]):F0}";
                 }
             }
             else if (textResources != null)
@@ -355,15 +618,25 @@ namespace GalaxyAgent.UI
         // ==================== 按钮事件 ====================
 
         /// <summary>
-        /// 保存游戏：收集所有Agent状态和基地数据写入数据库
+        /// 手动保存按钮回调
         /// </summary>
         private void OnSaveClicked()
         {
-            if (_saveManager == null || _agents == null) return;
+            if (SaveGame())
+                Debug.Log("[GameHUD] 游戏已保存");
+        }
+
+        /// <summary>
+        /// 执行一次保存（手动按钮 / 自动保存共用）。
+        /// 收集所有Agent状态、基地仓库、游戏时间、LLM配置写入数据库，返回是否保存成功。
+        /// </summary>
+        private bool SaveGame()
+        {
+            if (_saveManager == null || _agents == null) return false;
             if (string.IsNullOrEmpty(GameManager.Instance.CurrentSaveId))
             {
                 Debug.LogError("[GameHUD] 保存失败：当前没有有效存档ID");
-                return;
+                return false;
             }
 
             var agentArray = new AgentData[_agents.Count];
@@ -380,10 +653,15 @@ namespace GalaxyAgent.UI
                 _timeSystem != null ? _timeSystem.PlayTimeSeconds : 0f,
                 _timeSystem != null ? _timeSystem.GameDay : 1,
                 _baseController != null ? _baseController.Storage : new Dictionary<ResourceType, float>(),
-                _timeSystem != null ? _timeSystem.GameTimeSeconds : 0f
+                _timeSystem != null ? _timeSystem.GameTimeSeconds : 0f,
+                LLMManager.Instance != null ? LLMManager.Instance.CurrentUrl : "",
+                LLMManager.Instance != null ? LLMManager.Instance.CurrentModel : ""
             );
 
-            Debug.Log("[GameHUD] 游戏已保存");
+            // 记录上次保存时的游戏天数（供自动保存状态文本显示）
+            if (_timeSystem != null)
+                _lastSaveDay = _timeSystem.GameDay;
+            return true;
         }
 
         /// <summary>
@@ -420,72 +698,133 @@ namespace GalaxyAgent.UI
         }
 
         /// <summary>
-        /// 测试按钮回调：立即触发所有Agent的高层LLM决策（跳过30秒定时），并自动打开对话窗口查看结果。
+        /// 切换游戏配置面板的显示/隐藏
         /// </summary>
-        private void OnTestDecisionClicked()
+        private void ToggleConfigPanel()
         {
-            if (_agents == null || _agents.Count == 0)
+            if (_configPanel == null)
             {
-                Debug.LogWarning("[GameHUD] 测试决策失败：当前无Agent");
+                Debug.LogWarning("[GameHUD] 配置面板未初始化");
                 return;
             }
+            if (_configPanel.IsVisible) _configPanel.Hide();
+            else _configPanel.Show();
+        }
 
-            string firstAgent = "global";
-            int count = 0;
-            foreach (var kvp in _agents)
+        /// <summary>
+        /// 打开科技树面板（由基地信息面板的"科技树"按钮调用）
+        /// </summary>
+        public void ShowTechTree()
+        {
+            if (_techTreePanel == null)
             {
-                if (count == 0) firstAgent = kvp.Key;
-                kvp.Value.TriggerHighLevelDecisionForTest();
-                count++;
+                Debug.LogWarning("[GameHUD] 科技树面板未初始化");
+                return;
             }
-            Debug.Log($"[GameHUD] 已触发 {count} 个Agent的高层LLM决策测试");
+            _techTreePanel.Show(_baseController);
+        }
 
-            // 自动打开对话窗口并切到第一个Agent，方便立即查看决策结果
-            if (_llmWindow != null)
-                _llmWindow.Show(firstAgent);
+        /// <summary>隐藏科技树面板</summary>
+        public void HideTechTree()
+        {
+            if (_techTreePanel != null) _techTreePanel.Hide();
+        }
+
+        // ==================== 自动保存 ====================
+
+        /// <summary>
+        /// 读取自动保存开关（每次读取最新配置，运行时改配置立即生效）
+        /// </summary>
+        private bool IsAutoSaveEnabled()
+        {
+            var cfg = GameConfigManager.Instance != null ? GameConfigManager.Instance.Config?.Save : null;
+            return cfg != null && cfg.AutoSaveEnabled;
+        }
+
+        /// <summary>
+        /// 读取自动保存间隔（现实秒），非法值兜底为默认60秒
+        /// </summary>
+        private float GetAutoSaveInterval()
+        {
+            var cfg = GameConfigManager.Instance != null ? GameConfigManager.Instance.Config?.Save : null;
+            float interval = cfg != null ? cfg.AutoSaveInterval : Constants.AUTOSAVE_DEFAULT_INTERVAL;
+            return interval > 1f ? interval : Constants.AUTOSAVE_DEFAULT_INTERVAL;
+        }
+
+        /// <summary>
+        /// 自动保存驱动：按现实时间倒计时（不受游戏暂停影响），归零时自动存档，并持续刷新状态文本。
+        /// 使用 Time.unscaledDeltaTime —— 即使游戏暂停，自动保存仍按现实秒工作，防止数据丢失。
+        /// </summary>
+        private void UpdateAutoSave()
+        {
+            bool enabled = IsAutoSaveEnabled();
+            float interval = GetAutoSaveInterval();
+
+            if (enabled)
+            {
+                _autoSaveTimer -= Time.unscaledDeltaTime;
+                if (_autoSaveTimer <= 0f)
+                {
+                    if (SaveGame())
+                        Debug.Log("[GameHUD] 自动保存完成");
+                    _autoSaveTimer = interval;
+                }
+            }
+            else
+            {
+                // 关闭时持续重置倒计时，避免下次开启瞬间触发一次
+                _autoSaveTimer = interval;
+            }
+
+            // 更新底栏状态文本
+            if (_autoSaveText != null)
+            {
+                if (enabled)
+                {
+                    int remain = Mathf.CeilToInt(Mathf.Max(0f, _autoSaveTimer));
+                    string last = _lastSaveDay > 0 ? $"上次:第{_lastSaveDay}天" : "未保存";
+                    _autoSaveText.text = $"自动保存 {remain}s {last}";
+                }
+                else
+                {
+                    _autoSaveText.text = "自动保存 已关闭";
+                }
+            }
         }
 
         // ==================== 点击事件 ====================
 
         /// <summary>
-        /// Agent被点击：显示Agent信息面板，隐藏基地面板
+        /// Agent被点击：与点击头像走同一选中逻辑（高亮+信息面板+摄像机跟随）
         /// </summary>
         private void OnAgentClicked(AgentClickedEvent e)
         {
-            if (agentInfoPanel == null) return;
-
-            // 先隐藏基地面板
-            if (baseInfoPanel != null) baseInfoPanel.Hide();
-
-            // 显示Agent面板
             if (_agents != null && _agents.ContainsKey(e.AgentId))
             {
-                agentInfoPanel.Show(_agents[e.AgentId].AgentData);
+                SelectAgent(e.AgentId);
             }
         }
 
         /// <summary>
-        /// 基地被点击：显示基地信息面板，隐藏Agent面板
+        /// 基地被点击：与点击基地头像走同一选中逻辑（高亮+信息面板+摄像机移到基地）
         /// </summary>
         private void OnBaseClicked(BaseClickedEvent e)
         {
-            // 先隐藏Agent面板
-            if (agentInfoPanel != null) agentInfoPanel.Hide();
-
-            // 显示基地面板
-            if (baseInfoPanel != null && _baseController != null)
+            if (_baseController != null)
             {
-                baseInfoPanel.Show(_baseController);
+                SelectBase();
             }
         }
 
         /// <summary>
-        /// 地图空白被点击：关闭所有信息面板
+        /// 地图空白被点击：关闭所有信息面板并取消选中（摄像机恢复自由视角）
         /// </summary>
         private void OnMapClicked(MapClickedEvent e)
         {
             if (agentInfoPanel != null) agentInfoPanel.Hide();
             if (baseInfoPanel != null) baseInfoPanel.Hide();
+            if (_techTreePanel != null) _techTreePanel.Hide();
+            DeselectAgent();
         }
 
         // ==================== 清理 ====================
