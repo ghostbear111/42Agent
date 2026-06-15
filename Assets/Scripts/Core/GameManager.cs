@@ -5,6 +5,7 @@
 /// </summary>
 using GalaxyAgent.Data.Enums;
 using GalaxyAgent.Data.Models;
+using GalaxyAgent.Map;
 using UnityEngine;
 
 namespace GalaxyAgent.Core
@@ -21,6 +22,15 @@ namespace GalaxyAgent.Core
         public MapConfig CurrentMapConfig { get; set; }
         /// <summary>当前地图种子</summary>
         public int CurrentSeed { get; set; }
+
+        /// <summary>
+        /// 发射阶段已生成的地图生成器（缓存）。
+        /// 新游戏发射时 MapGenUI 会生成一次地图用于建存档，进 GameScene 时直接复用，
+        /// 避免对大尺寸地图（如 5120²）重复生成一整次，显著缩短进入游戏的时间。
+        /// 仅对新游戏路径有效；加载存档路径不走这里（运行时按种子重新生成）。
+        /// 消费后由 GameSceneController 置空，释放引用。
+        /// </summary>
+        public MapGenerator PendingMapGenerator { get; set; }
         /// <summary>是否暂停</summary>
         public bool IsPaused { get; set; }
         /// <summary>时间倍率</summary>

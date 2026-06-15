@@ -76,7 +76,7 @@ namespace GalaxyAgent.Database
                 $"SELECT save_id, planet_name, seed, map_size, tile_size, " +
                 $"terrain_type, resource_level, risk_level, weather_type, day_night_mode, " +
                 $"created_at, play_time_seconds, game_day, game_time_seconds, " +
-                $"llm_url, llm_model FROM saves WHERE save_id = '{safeId}'",
+                $"llm_url, llm_model, planet_description FROM saves WHERE save_id = '{safeId}'",
                 columns =>
                 {
                     save = new GameSaveData
@@ -96,9 +96,10 @@ namespace GalaxyAgent.Database
                         GameDay = int.Parse(columns[12]),
                         GameTimeSeconds = columns.Length > 13 ? ParseFloat(columns[13]) : 0f,
                         LlmUrl = columns.Length > 14 ? (columns[14] ?? "") : "",
-                        LlmModel = columns.Length > 15 ? (columns[15] ?? "") : ""
+                        LlmModel = columns.Length > 15 ? (columns[15] ?? "") : "",
+                        PlanetDescription = columns.Length > 16 ? (columns[16] ?? "") : ""
                     };
-                    Debug.Log($"[SaveLoadManager] 读取存档: gameDay={save.GameDay}, gameTimeSeconds={save.GameTimeSeconds:F1}, llmUrl={save.LlmUrl}, llmModel={save.LlmModel}, columns.Length={columns.Length}");
+                    Debug.Log($"[SaveLoadManager] 读取存档: gameDay={save.GameDay}, gameTimeSeconds={save.GameTimeSeconds:F1}, llmUrl={save.LlmUrl}, llmModel={save.LlmModel}, hasDesc={save.PlanetDescription.Length > 0}, columns.Length={columns.Length}");
                 });
             return save;
         }
@@ -146,17 +147,19 @@ namespace GalaxyAgent.Database
             string saveId = Guid.NewGuid().ToString("N").Substring(0, 8);
             string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             string safePlanetName = DatabaseManager.Escape(config.PlanetName);
+            string safeDescription = DatabaseManager.Escape(config.PlanetDescription ?? "");
 
-            // 插入存档元数据（新游戏时game_time_seconds为0；LLM配置留空，由游戏内首次保存写入）
+            // 插入存档元数据（新游戏时game_time_seconds为0；LLM配置留空，由游戏内首次保存写入；
+            // planet_description 存 LLM 生成的星球介绍，游戏内顶栏点击星球名可查看）
             _db.ExecuteNonQuery($@"
                 INSERT INTO saves (save_id, planet_name, seed, map_size, tile_size,
                     terrain_type, resource_level, risk_level, weather_type, day_night_mode,
                     created_at, play_time_seconds, game_day, game_time_seconds,
-                    llm_url, llm_model)
+                    llm_url, llm_model, planet_description)
                 VALUES ('{saveId}', '{safePlanetName}', {seed}, {config.MapWidth},
                     {config.PixelSize}, '{config.Terrain}', '{config.Resources}',
                     '{config.Risk}', '{config.Weather}', '{config.DayNight}',
-                    '{now}', 0, 1, 0, '', '')");
+                    '{now}', 0, 1, 0, '', '', '{safeDescription}')");
 
             // 保存资源节点
             foreach (var res in mapGenerator.Resources)

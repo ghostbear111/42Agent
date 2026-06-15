@@ -16,6 +16,7 @@
 /// </summary>
 using System.Collections.Generic;
 using GalaxyAgent.Data.Enums;
+using GalaxyAgent.Modding;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -91,9 +92,14 @@ namespace GalaxyAgent.UI
             if (_cache.TryGetValue(fileName, out var cached)) return cached;
 
             Sprite sprite = null;
-            var all = Resources.LoadAll<Sprite>(DIR + fileName);
-            if (all != null && all.Length > 0) sprite = all[0];
-            else Debug.LogWarning($"[SpriteRegistry] 占位图缺失或无 Sprite: {DIR}{fileName}");
+            // 1) 优先 Mod 目录（玩家自定图）；返回 null 则 fallback 内置 Resources
+            sprite = ModManager.TryLoadSprite(fileName);
+            if (sprite == null)
+            {
+                var all = Resources.LoadAll<Sprite>(DIR + fileName);
+                if (all != null && all.Length > 0) sprite = all[0];
+                else Debug.LogWarning($"[SpriteRegistry] 占位图缺失或无 Sprite: {DIR}{fileName}");
+            }
 
             _cache[fileName] = sprite; // 含 null 缓存
             return sprite;
@@ -105,14 +111,17 @@ namespace GalaxyAgent.UI
         /// 给 Image 贴占位图；sprite 为 null 时保持原色块（降级）。
         /// 统一所有接入点的"有图贴图、无图留色"逻辑：
         /// 贴图时强制 color=white（避免色块 tint 污染贴图）+ type=Simple（防止 Sliced 拉伸异常）。
+        /// preserveAspect 默认 true：正方形图在非方形槽位（如顶栏窄高图标槽）按比例居中、不变形拉伸；
+        ///   背景（ApplySceneBackground）传 false 以铺满全屏。降级色块不受影响（纯色填满）。
         /// </summary>
-        public static void ApplySpriteOrColor(Image img, Sprite sprite)
+        public static void ApplySpriteOrColor(Image img, Sprite sprite, bool preserveAspect = true)
         {
             if (img == null) return;
             if (sprite == null) return; // 降级：保留 img 原 color（色块）
             img.sprite = sprite;
             img.color = Color.white;
             img.type = Image.Type.Simple;
+            img.preserveAspect = preserveAspect;
         }
 
         /// <summary>

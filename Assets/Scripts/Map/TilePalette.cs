@@ -49,6 +49,19 @@ namespace GalaxyAgent.Map
             return _resourceTiles[resourceType];
         }
 
+        /// <summary>共享白色基础 Tile 缓存</summary>
+        private static Tile _whiteTile;
+
+        /// <summary>
+        /// 获取共享白色基础 Tile（地图风格渲染用：所有格共用，
+        /// 靠 Tilemap per-cell SetColor 染色实现连续伪色，零资产膨胀）。
+        /// </summary>
+        public static Tile GetWhiteTile()
+        {
+            if (_whiteTile == null) _whiteTile = CreateColorTile(Color.white);
+            return _whiteTile;
+        }
+
         /// <summary>
         /// 根据地形类型获取对应颜色
         /// </summary>

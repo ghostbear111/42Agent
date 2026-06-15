@@ -65,6 +65,16 @@ namespace GalaxyAgent.Map
             _mapMaxY = mapWidth;
             _hasBounds = true;
 
+            // 按地图尺寸动态限制最大缩放：确保最远时视野不超出地图边界。
+            // 视野高 = 2×orthoSize ≤ mapWidth → orthoSize ≤ mapWidth/2
+            // 视野宽 = 2×orthoSize×aspect ≤ mapWidth → orthoSize ≤ mapWidth/(2×aspect)
+            float maxByHeight = mapWidth * 0.5f;
+            float maxByWidth = mapWidth * 0.5f / Mathf.Max(0.1f, _camera.aspect);
+            maxOrthographicSize = Mathf.Min(maxOrthographicSize, maxByHeight, maxByWidth);
+            maxOrthographicSize = Mathf.Max(maxOrthographicSize, minOrthographicSize);
+            if (_camera.orthographicSize > maxOrthographicSize)
+                _camera.orthographicSize = maxOrthographicSize;
+
             // 立即限制摄像机位置
             ClampCameraPosition();
         }

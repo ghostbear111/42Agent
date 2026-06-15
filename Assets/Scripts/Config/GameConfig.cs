@@ -32,6 +32,16 @@ namespace GalaxyAgent.Config
         public LlmConfig Llm = new LlmConfig();
         /// <summary>存档 / 自动保存参数</summary>
         public SaveConfig Save = new SaveConfig();
+        /// <summary>地图视觉风格参数</summary>
+        public MapStyleConfig MapStyle = new MapStyleConfig();
+    }
+
+    /// <summary>地图视觉风格：风格Id(见 MapStyleProfilePalette.All，设置面板可切换)</summary>
+    [Serializable]
+    public class MapStyleConfig
+    {
+        [UnityEngine.Tooltip("地图视觉风格Id(starchart/infrared/hologram/thermal/radiation/matrix/cyberpunk/cyberhypsometric/dotmatrix)")]
+        public string StyleId = "starchart";
     }
 
     /// <summary>Agent 平衡：属性上限/消耗、移动、感知、决策间隔</summary>

@@ -34,6 +34,9 @@ namespace GalaxyAgent.Data.Models
         [Tooltip("星球名称")]
         public string PlanetName = "";
 
+        [Tooltip("星球介绍/档案（LLM 创建星球时生成，游戏内顶栏点击星球名可查看；手动创建时为空）")]
+        [TextArea] public string PlanetDescription = "";
+
         /// <summary>
         /// 获取地图边长（格数）
         /// </summary>

@@ -43,6 +43,9 @@ namespace GalaxyAgent.Data.Models
         /// <summary>该存档保存时的LLM模型名（加载后恢复，空串表示用默认）</summary>
         public string LlmModel = "";
 
+        /// <summary>星球介绍/档案（LLM 创建星球时生成，游戏内顶栏点击星球名可查看）</summary>
+        public string PlanetDescription = "";
+
         /// <summary>
         /// 获取地图参数的中文描述
         /// </summary>

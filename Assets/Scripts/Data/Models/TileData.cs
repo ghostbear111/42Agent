@@ -21,6 +21,8 @@ namespace GalaxyAgent.Data.Models
         public float Temperature = 20f;
         /// <summary>辐射值（0-1）</summary>
         public float Radiation = 0f;
+        /// <summary>高度噪声值（0-1，MapGenerator 生成时存，供视觉风格/梯度计算用）</summary>
+        public float Height = 0f;
         /// <summary>是否可通行</summary>
         public bool IsWalkable = true;
         /// <summary>移动代价（用于寻路，越大越难通行）</summary>

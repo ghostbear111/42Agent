@@ -4,6 +4,7 @@
 /// 负责：初始化地图、创建Agent、设置基地、启动时间系统、连接UI
 /// 当场景加载时（新游戏/加载游戏）自动执行初始化流程
 /// </summary>
+using System.Collections;
 using System.Collections.Generic;
 using GalaxyAgent.Config;
 using GalaxyAgent.Core;
@@ -72,21 +73,42 @@ namespace GalaxyAgent
             EventBus.Subscribe<NewGameStartedEvent>(OnNewGameStarted);
             EventBus.Subscribe<GameLoadedEvent>(OnGameLoaded);
 
-            // 判断是新游戏还是加载
-            if (!string.IsNullOrEmpty(GameManager.Instance.CurrentSaveId))
-            {
-                // 加载已有存档
-                LoadGame(GameManager.Instance.CurrentSaveId);
-            }
-            else if (GameManager.Instance.CurrentMapConfig != null)
-            {
-                // 新游戏
-                InitializeNewGame(GameManager.Instance.CurrentMapConfig, GameManager.Instance.CurrentSeed);
-            }
-            else
+            // 初始化流程协程化：用 Loading 遮罩覆盖地图生成等同步耗时阶段，避免黑屏/卡死无提示
+            StartCoroutine(InitializeCoroutine());
+        }
+
+        /// <summary>
+        /// 初始化流程协程：在地图生成/加载前后显示 Loading 遮罩，并把同步耗时分阶段隔开。
+        /// 进入前快照游戏外 LLM 配置；地图生成是同步阻塞，故在生成前先 Show 并 yield 一帧让遮罩渲染。
+        /// </summary>
+        private IEnumerator InitializeCoroutine()
+        {
+            // 进入游戏场景前，快照游戏外 LLM 配置（返回主菜单/场景销毁时由 OnDestroy 恢复，
+            // 避免加载存档时的 Configure 把主菜单的模型配置「串掉」）
+            LLMManager.Instance?.SaveOuterConfig();
+
+            bool isLoad = !string.IsNullOrEmpty(GameManager.Instance.CurrentSaveId);
+            bool isNew = GameManager.Instance.CurrentMapConfig != null;
+
+            if (!isLoad && !isNew)
             {
                 Debug.LogWarning("[GameScene] 未找到当前存档或地图配置，场景保持待机状态");
+                yield break;
             }
+
+            // 显示 Loading 遮罩，并让出一帧使其渲染出来（地图生成是同步阻塞，遮罩需在生成前可见）
+            LoadingScreen.Show(isLoad ? "正在加载星球…" : "正在生成星球…", 0.1f);
+            yield return null;
+
+            if (isLoad)
+                yield return LoadGameCoroutine(GameManager.Instance.CurrentSaveId);
+            else
+                InitializeNewGame(GameManager.Instance.CurrentMapConfig, GameManager.Instance.CurrentSeed);
+
+            // 初始化完成，刷新一帧进度后收起遮罩
+            LoadingScreen.Show("部署完成，进入星球…", 1f);
+            yield return null;
+            LoadingScreen.Hide();
         }
 
         private void Update()
@@ -205,12 +227,18 @@ namespace GalaxyAgent
 
             Debug.Log($"[GameScene] 初始化新游戏 - {config.PlanetName}, 种子:{seed}");
 
-            // 生成地图
-            _mapGenerator = new MapGenerator(config, seed);
-            _mapGenerator.Generate();
+            // 生成地图：新游戏优先复用发射阶段（MapGenUI）已生成的，避免对大地图重复生成一整次；
+            // 复用失败（如冷启动直进场景）才现场生成
+            _mapGenerator = GameManager.Instance.PendingMapGenerator;
+            if (_mapGenerator == null)
+            {
+                _mapGenerator = new MapGenerator(config, seed);
+                _mapGenerator.Generate();
+            }
+            GameManager.Instance.PendingMapGenerator = null; // 消费后置空，释放引用
 
             // 初始化分块系统
-            _chunkManager.Initialize(_mapGenerator, terrainTilemap, config);
+            _chunkManager.Initialize(_mapGenerator, terrainTilemap, config, GetMapStyle());
 
             // 基地位置（地图中心）
             Vector2 basePos = new Vector2(config.MapWidth / 2f, config.MapWidth / 2f);
@@ -241,6 +269,8 @@ namespace GalaxyAgent
 
             // 设置摄像机到基地位置
             Camera.main.transform.position = new Vector3(basePos.x, basePos.y, -10);
+            // 瓦片越大相机越近(C方案)：视觉上格子变大、同屏看到更少
+            Camera.main.orthographicSize = OrthoSizeForTile(config.TileSize);
 
             // 设置摄像机地图边界
             var camCtrl = Camera.main.GetComponent<CameraController>();
@@ -259,12 +289,12 @@ namespace GalaxyAgent
         /// <summary>
         /// 加载已有存档
         /// </summary>
-        private void LoadGame(string saveId)
+        private IEnumerator LoadGameCoroutine(string saveId)
         {
             if (_isInitialized)
             {
                 Debug.LogWarning("[GameScene] 加载请求被忽略：游戏场景已经初始化");
-                return;
+                yield break;
             }
 
             Debug.Log($"[GameScene] 加载存档: {saveId}");
@@ -273,7 +303,7 @@ namespace GalaxyAgent
             if (saveData == null)
             {
                 Debug.LogError($"[GameScene] 存档 {saveId} 不存在！");
-                return;
+                yield break;
             }
             _isInitialized = true;
 
@@ -288,14 +318,15 @@ namespace GalaxyAgent
             _mapConfig.Weather = saveData.WeatherType;
             _mapConfig.DayNight = saveData.DayNightMode;
             _mapConfig.Seed = saveData.Seed;
+            _mapConfig.PlanetDescription = saveData.PlanetDescription ?? "";
             _seed = saveData.Seed;
 
-            // 重新生成地图（确定性）
+            // 重新生成地图（确定性，协程化推进 Loading 进度，避免大地图生成时进度条卡死）
             _mapGenerator = new MapGenerator(_mapConfig, _seed);
-            _mapGenerator.Generate();
+            yield return _mapGenerator.GenerateCoroutine((tip, p) => LoadingScreen.Show(tip, p));
 
             // 初始化分块系统
-            _chunkManager.Initialize(_mapGenerator, terrainTilemap, _mapConfig);
+            _chunkManager.Initialize(_mapGenerator, terrainTilemap, _mapConfig, GetMapStyle());
 
             // 加载基地
             var basePos = _saveManager.LoadBasePosition(saveId);
@@ -347,6 +378,8 @@ namespace GalaxyAgent
                 Camera.main.transform.position =
                     new Vector3(_baseController.transform.position.x,
                                 _baseController.transform.position.y, -10);
+                // 瓦片越大相机越近(C方案)
+                Camera.main.orthographicSize = OrthoSizeForTile(_mapConfig.TileSize);
                 _chunkManager.LoadInitialChunks(_baseController.transform.position);
             }
 
@@ -360,6 +393,24 @@ namespace GalaxyAgent
                     _dbManager, _saveManager, _mapGenerator, _mapConfig, _weatherSystem);
 
             Debug.Log($"[GameScene] 存档加载完成！第{saveData.GameDay}天, {saveData.GetFormattedPlayTime()}");
+        }
+
+        /// <summary>瓦片越大相机默认越近(C方案)：Size32→20 / Size64→14 / Size128→10，视觉上格子变大、同屏看到更少格</summary>
+        private static float OrthoSizeForTile(TilePixelSize t) => t switch
+        {
+            TilePixelSize.Size32 => 20f,
+            TilePixelSize.Size64 => 14f,
+            TilePixelSize.Size128 => 10f,
+            _ => 20f
+        };
+
+        /// <summary>获取当前地图视觉风格(从 GameConfig.MapStyle.StyleId 读，缺失用默认)</summary>
+        private static MapStyleProfile GetMapStyle()
+        {
+            string id = GameConfigManager.Instance != null && GameConfigManager.Instance.Config?.MapStyle != null
+                ? GameConfigManager.Instance.Config.MapStyle.StyleId
+                : null;
+            return MapStyleProfilePalette.GetById(id);
         }
 
         // ==================== 实体创建 ====================
@@ -415,7 +466,7 @@ namespace GalaxyAgent
 
         private void OnGameLoaded(GameLoadedEvent e)
         {
-            LoadGame(e.SaveId);
+            StartCoroutine(LoadGameCoroutine(e.SaveId));
         }
 
         private void OnDestroy()
@@ -423,6 +474,10 @@ namespace GalaxyAgent
             EventBus.Unsubscribe<NewGameStartedEvent>(OnNewGameStarted);
             EventBus.Unsubscribe<GameLoadedEvent>(OnGameLoaded);
             _dbManager?.Close();
+
+            // 离开游戏场景：恢复游戏外 LLM 配置（若进入时保存过快照），
+            // 确保返回主菜单后全局配置还原成进入游戏前的状态
+            LLMManager.Instance?.RestoreOuterConfig();
         }
     }
 }

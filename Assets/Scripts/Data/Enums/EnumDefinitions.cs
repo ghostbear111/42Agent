@@ -180,12 +180,18 @@ namespace GalaxyAgent.Data.Enums
     /// </summary>
     public enum MapSize
     {
-        /// <summary>小型 1024×1024</summary>
-        Small = 1024,
-        /// <summary>中型 3072×3072</summary>
-        Medium = 3072,
-        /// <summary>大型 5120×5120</summary>
-        Large = 5120
+        /// <summary>预览 64×64（仅 StyleTest 风格试验场用，不在正式游戏出现）</summary>
+        Preview = 64,
+        /// <summary>微型 128×128</summary>
+        Tiny = 128,
+        /// <summary>小型 256×256</summary>
+        Small = 256,
+        /// <summary>中型 512×512</summary>
+        Medium = 512,
+        /// <summary>大型 1024×1024</summary>
+        Large = 1024,
+        /// <summary>巨型 2048×2048</summary>
+        Huge = 2048
     }
 
     // ==================== Agent ====================
@@ -297,7 +303,9 @@ namespace GalaxyAgent.Data.Enums
         /// <summary>32×32像素</summary>
         Size32 = 32,
         /// <summary>64×64像素</summary>
-        Size64 = 64
+        Size64 = 64,
+        /// <summary>128×128像素</summary>
+        Size128 = 128
     }
 
     // ==================== 探索发现 ====================

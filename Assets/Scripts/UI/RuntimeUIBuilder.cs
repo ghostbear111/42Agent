@@ -154,6 +154,7 @@ namespace GalaxyAgent.UI
             string key = label switch
             {
                 "暂停" => "pause",
+                "设置" => "config",
                 "配置" => "config",
                 "LLM对话" => "chat",
                 "保存" => "save",
@@ -189,7 +190,7 @@ namespace GalaxyAgent.UI
             if (panel == null) return;
             var img = panel.GetComponent<Image>();
             if (img == null) return;
-            SpriteRegistry.ApplySpriteOrColor(img, SpriteRegistry.GetSceneBg(bgName));
+            SpriteRegistry.ApplySpriteOrColor(img, SpriteRegistry.GetSceneBg(bgName), preserveAspect: false);
         }
 
         /// <summary>

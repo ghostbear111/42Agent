@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Models;
 using GalaxyAgent.Database;
+using GalaxyAgent.LLM;
+using GalaxyAgent.Modding;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -31,6 +33,16 @@ namespace GalaxyAgent.UI
         private DatabaseManager _dbManager;
         private SaveLoadManager _saveLoadManager;
 
+        // LLM 相关：连接状态显示、设置按钮、设置面板
+        private Text _llmStatusText;
+        private Button _btnSettings;
+        private LLMSettingsPanel _settingsPanel;
+
+        // Mod 换图：Mod 按钮 + Mod 面板
+        private Button _btnMod;
+        private ModPanel _modPanel;
+        private float _statusTimer;
+
         private void Start()
         {
             // 始终构建UI（按钮引用为空说明尚未构建）
@@ -49,6 +61,14 @@ namespace GalaxyAgent.UI
             if (_buttonLoadGame != null) _buttonLoadGame.onClick.AddListener(OnLoadGameClicked);
             if (_buttonQuit != null) _buttonQuit.onClick.AddListener(OnQuitClicked);
             if (_buttonBackFromSaves != null) _buttonBackFromSaves.onClick.AddListener(OnBackFromSavesClicked);
+            if (_btnSettings != null) _btnSettings.onClick.AddListener(OnSettingsClicked);
+            if (_btnMod != null) _btnMod.onClick.AddListener(OnModClicked);
+
+            // 触发 LLMManager 初始化（Singleton 自动创建 + 跨场景 DontDestroyOnLoad），启动连接检测
+            _ = LLMManager.Instance;
+
+            // Mod 换图：首次启动自动创建 Mods 目录 + 导出默认模板（玩家进游戏目录即可见现成模板）
+            ModManager.EnsureModSetup();
 
             // 检查存档状态
             UpdateLoadButtonState();
@@ -71,9 +91,9 @@ namespace GalaxyAgent.UI
                 0f, 0f, 1f, 1f);
             RuntimeUIBuilder.ApplySceneBackground(bg, "mainmenu");
 
-            // 标题
+            // 标题 42Agent - 星球生存探索模拟器
             RuntimeUIBuilder.CreateText("Title", transform,
-                "42Agent - 星球生存探索模拟器", 40, new Color(0.4f, 0.8f, 1f),
+                " ", 40, new Color(0.4f, 0.8f, 1f),
                 TextAnchor.MiddleCenter, 0.1f, 0.75f, 0.9f, 0.9f);
 
             // 按钮
@@ -111,6 +131,22 @@ namespace GalaxyAgent.UI
                 "返回", new Color(0.3f, 0.3f, 0.3f),
                 0.35f, 0.02f, 0.65f, 0.1f);
 
+            // LLM 连接状态指示（右上角，颜色区分已连接/未连接）
+            _llmStatusText = RuntimeUIBuilder.CreateText("LLMStatus", transform,
+                "LLM: 检测中…", 16, new Color(0.9f, 0.85f, 0.4f),
+                TextAnchor.MiddleRight, 0.55f, 0.90f, 0.80f, 0.96f);
+
+            // 设置按钮（右上角，打开 LLM 设置面板，可切换服务地址与模型）
+            _btnSettings = RuntimeUIBuilder.CreateButton("BtnSettings", transform,
+                "设置", new Color(0.2f, 0.3f, 0.45f),
+                0.82f, 0.89f, 0.97f, 0.96f,
+                SpriteRegistry.GetButtonIcon("config"));
+
+            // Mod 按钮（设置按钮正下方，打开 Mod 换图面板，玩家用游戏目录下的文件替换图片）
+            _btnMod = RuntimeUIBuilder.CreateButton("BtnMod", transform,
+                "Mod", new Color(0.35f, 0.25f, 0.15f),
+                0.82f, 0.80f, 0.97f, 0.87f);
+
             // 删除确认对话框（初始隐藏）
             BuildConfirmDialog();
         }
@@ -138,6 +174,62 @@ namespace GalaxyAgent.UI
 #else
             Application.Quit();
 #endif
+        }
+
+        private void Update()
+        {
+            // 轮询 LLM 连接状态（IsAvailable 为异步更新，0.5s 刷新一次显示）
+            _statusTimer += Time.unscaledDeltaTime;
+            if (_statusTimer >= 0.5f)
+            {
+                _statusTimer = 0f;
+                UpdateLlmStatus();
+            }
+        }
+
+        /// <summary>刷新右上角 LLM 连接状态文本与颜色</summary>
+        private void UpdateLlmStatus()
+        {
+            if (_llmStatusText == null) return;
+            var mgr = LLMManager.Instance;
+            if (mgr == null)
+            {
+                _llmStatusText.text = "LLM: 未初始化";
+                _llmStatusText.color = new Color(0.6f, 0.6f, 0.6f);
+                return;
+            }
+            if (mgr.IsAvailable)
+            {
+                _llmStatusText.text = $"LLM: 已连接 ({mgr.CurrentModel})";
+                _llmStatusText.color = new Color(0.4f, 0.85f, 0.5f);
+            }
+            else
+            {
+                _llmStatusText.text = "LLM: 未连接";
+                _llmStatusText.color = new Color(0.9f, 0.6f, 0.4f);
+            }
+        }
+
+        /// <summary>点击设置：打开 LLM 设置面板（首次按需构建并挂在同一 Canvas 下）</summary>
+        private void OnSettingsClicked()
+        {
+            if (_settingsPanel == null)
+            {
+                _settingsPanel = gameObject.AddComponent<LLMSettingsPanel>();
+                _settingsPanel.BuildUI(transform);
+            }
+            _settingsPanel.Show();
+        }
+
+        /// <summary>点击 Mod：打开 Mod 换图面板（首次按需构建），玩家用游戏目录下的文件替换图片</summary>
+        private void OnModClicked()
+        {
+            if (_modPanel == null)
+            {
+                _modPanel = gameObject.AddComponent<ModPanel>();
+                _modPanel.BuildUI(transform);
+            }
+            _modPanel.Show();
         }
 
         private void UpdateLoadButtonState()

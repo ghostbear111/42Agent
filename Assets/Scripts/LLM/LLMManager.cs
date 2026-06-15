@@ -44,6 +44,12 @@ namespace GalaxyAgent.LLM
         /// <summary>当前模型（可运行时切换，小模型推理更快）</summary>
         private string _currentModel = Constants.OLLAMA_DEFAULT_MODEL;
 
+        // 游戏外（主菜单）配置快照：进入游戏场景前保存，离开时恢复，
+        // 实现「游戏外配置」与「游戏内存档配置」的运行时隔离，避免存档 Configure 污染全局单例
+        private string _outerUrl;
+        private string _outerModel;
+        private bool _hasOuterSnapshot;
+
         // ==================== 对外属性 ====================
 
         /// <summary>LLM是否可用（已连接）</summary>
@@ -173,6 +179,38 @@ namespace GalaxyAgent.LLM
             {
                 Debug.Log($"[LLMManager] 切换后 {_client.ProviderName} 可用性: {available}");
             });
+        }
+
+        /// <summary>
+        /// 保存当前配置为「游戏外配置」快照（进入游戏场景前调用）。
+        /// 幂等：已有快照则不覆盖，确保保留的是最早（真正游戏外）的配置。
+        /// 配合 <see cref="RestoreOuterConfig"/> 使用，使存档的 Configure 只影响游戏内运行，
+        /// 返回主菜单时全局配置自动还原到进入游戏前的状态。
+        /// </summary>
+        public void SaveOuterConfig()
+        {
+            if (_hasOuterSnapshot)
+            {
+                Debug.Log("[LLMManager] 游戏外配置快照已存在，保留最早快照");
+                return;
+            }
+            _outerUrl = _currentUrl;
+            _outerModel = _currentModel;
+            _hasOuterSnapshot = true;
+            Debug.Log($"[LLMManager] 已保存游戏外配置快照: url={_outerUrl} model={_outerModel}");
+        }
+
+        /// <summary>
+        /// 恢复游戏外配置（离开游戏场景时调用，如返回主菜单触发 GameScene 销毁）。
+        /// 取出快照重新 Configure，使全局 LLM 配置回到进入游戏前的状态，
+        /// 避免加载存档时的 Configure 把主菜单的模型配置「串掉」。无快照时空操作。
+        /// </summary>
+        public void RestoreOuterConfig()
+        {
+            if (!_hasOuterSnapshot) return;
+            _hasOuterSnapshot = false;
+            Debug.Log($"[LLMManager] 恢复游戏外配置: url={_outerUrl} model={_outerModel}");
+            Configure(_outerUrl, _outerModel);
         }
 
         /// <summary>

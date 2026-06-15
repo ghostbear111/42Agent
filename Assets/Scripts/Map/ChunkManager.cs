@@ -24,6 +24,7 @@ namespace GalaxyAgent.Map
         // 上一次更新的摄像机块坐标（用于检测是否需要更新）
         private int _lastCamChunkX = int.MinValue;
         private int _lastCamChunkY = int.MinValue;
+        private float _lastOrthoSize = -1f;
         // 地图配置
         private MapConfig _config;
         // 每维总块数
@@ -32,6 +33,11 @@ namespace GalaxyAgent.Map
         private Queue<Vector2Int> _loadQueue = new Queue<Vector2Int>();
         // 等待卸载的块队列
         private List<string> _unloadList = new List<string>();
+        // 当前地图视觉风格(决定每格颜色 + 动画 shader 参数)
+        private MapStyleProfile _currentProfile;
+        // 动画材质(ScanlineFx shader)，每帧推进 _FxTime
+        private Material _fxMaterial;
+        private Shader _fxShader;
 
         /// <summary>当前已加载的块数量</summary>
         public int LoadedChunkCount => _loadedChunks.Count;
@@ -42,14 +48,19 @@ namespace GalaxyAgent.Map
         /// <param name="mapGenerator">地图生成器实例</param>
         /// <param name="terrainTilemap">地形Tilemap组件</param>
         /// <param name="config">地图配置</param>
-        public void Initialize(MapGenerator mapGenerator, Tilemap terrainTilemap, MapConfig config)
+        public void Initialize(MapGenerator mapGenerator, Tilemap terrainTilemap, MapConfig config,
+            MapStyleProfile profile = null)
         {
             _mapGenerator = mapGenerator;
             _terrainTilemap = terrainTilemap;
             _config = config;
             _chunkCount = Mathf.CeilToInt((float)_config.MapWidth / Constants.CHUNK_SIZE);
+            _currentProfile = profile ?? MapStyleProfilePalette.GetById(MapStyleProfilePalette.DefaultId);
 
-            Debug.Log($"[ChunkManager] 初始化完成 - 总块数: {_chunkCount}×{_chunkCount}");
+            // 风格渲染 per-cell SetColor 性能不足，已暂时停用：RenderChunk 用批量 SetTiles 纯色块。
+            // shader 动画材质暂不挂载；SetupFxMaterial/SetStyle/ApplyFxParams 代码保留备用。
+
+            Debug.Log($"[ChunkManager] 初始化完成 - 总块数: {_chunkCount}×{_chunkCount} (纯色块模式)");
         }
 
         /// <summary>
@@ -59,65 +70,61 @@ namespace GalaxyAgent.Map
         {
             if (_mapGenerator == null || _terrainTilemap == null || Camera.main == null) return;
 
-            // 获取摄像机位置对应的块坐标
             Vector3 camPos = Camera.main.transform.position;
             int camChunkX = Mathf.FloorToInt(camPos.x / Constants.CHUNK_SIZE);
             int camChunkY = Mathf.FloorToInt(camPos.y / Constants.CHUNK_SIZE);
+            float orthoSize = Camera.main.orthographicSize;
 
-            // 摄像机未移动到新块，跳过
-            if (camChunkX == _lastCamChunkX && camChunkY == _lastCamChunkY) return;
+            bool moved = camChunkX != _lastCamChunkX || camChunkY != _lastCamChunkY;
+            bool zoomed = !Mathf.Approximately(orthoSize, _lastOrthoSize);
 
-            _lastCamChunkX = camChunkX;
-            _lastCamChunkY = camChunkY;
-
-            // 计算需要加载的块范围
-            int loadRadius = 3 + Constants.CHUNK_LOAD_MARGIN; // 视野半径 + 额外边距
-
-            // 收集需要加载的块
-            var chunksToLoad = new HashSet<string>();
-            for (int dx = -loadRadius; dx <= loadRadius; dx++)
+            // 摄像机/缩放变化 → 重新计算加载范围 + 卸载列表
+            // (缩放只改 orthoSize 不改 camChunk，必须单独检测 orthoSize)
+            if (moved || zoomed)
             {
-                for (int dy = -loadRadius; dy <= loadRadius; dy++)
+                _lastCamChunkX = camChunkX;
+                _lastCamChunkY = camChunkY;
+                _lastOrthoSize = orthoSize;
+
+                // 动态加载半径：覆盖当前视野(orthoSize×aspect) + 边距
+                float aspect = Camera.main.aspect;
+                int visRadius = Mathf.CeilToInt(orthoSize * Mathf.Max(1f, aspect) / Constants.CHUNK_SIZE);
+                int loadRadius = Mathf.Max(3, visRadius) + Constants.CHUNK_LOAD_MARGIN;
+
+                // 收集需要加载的块 + 未加载的入队
+                _loadQueue.Clear();
+                var chunksToLoad = new HashSet<string>();
+                for (int dx = -loadRadius; dx <= loadRadius; dx++)
                 {
-                    int cx = camChunkX + dx;
-                    int cy = camChunkY + dy;
-
-                    // 边界检查
-                    if (cx < 0 || cx >= _chunkCount || cy < 0 || cy >= _chunkCount) continue;
-
-                    string key = GetChunkKey(cx, cy);
-                    chunksToLoad.Add(key);
-
-                    // 未加载的块加入队列
-                    if (!_loadedChunks.ContainsKey(key))
+                    for (int dy = -loadRadius; dy <= loadRadius; dy++)
                     {
-                        _loadQueue.Enqueue(new Vector2Int(cx, cy));
+                        int cx = camChunkX + dx;
+                        int cy = camChunkY + dy;
+                        if (cx < 0 || cx >= _chunkCount || cy < 0 || cy >= _chunkCount) continue;
+                        string key = GetChunkKey(cx, cy);
+                        chunksToLoad.Add(key);
+                        if (!_loadedChunks.ContainsKey(key))
+                            _loadQueue.Enqueue(new Vector2Int(cx, cy));
                     }
                 }
+
+                // 收集需要卸载的块(不在视野范围)
+                _unloadList.Clear();
+                foreach (var kvp in _loadedChunks)
+                    if (!chunksToLoad.Contains(kvp.Key))
+                        _unloadList.Add(kvp.Key);
             }
 
-            // 收集需要卸载的块（不在视野范围内的）
-            _unloadList.Clear();
-            foreach (var kvp in _loadedChunks)
-            {
-                if (!chunksToLoad.Contains(kvp.Key))
-                {
-                    _unloadList.Add(kvp.Key);
-                }
-            }
-
-            // 每帧限制处理的块数
+            // 每帧持续处理加载/卸载队列(budget)，直到队列空。
+            // 关键：不再因 moved/zoomed=false 提前 return —— 否则未加载完的队列会被永久搁置 → 大片空白不恢复。
             int processed = 0;
-
-            // 卸载块
-            foreach (var key in _unloadList)
+            for (int i = 0; i < _unloadList.Count && processed < Constants.CHUNK_BUDGET_PER_FRAME; i++)
             {
-                if (processed >= Constants.CHUNK_BUDGET_PER_FRAME) break;
-                UnloadChunk(key);
+                UnloadChunk(_unloadList[i]);
                 processed++;
             }
+            if (processed > 0) _unloadList.Clear();
 
-            // 加载块
             while (_loadQueue.Count > 0 && processed < Constants.CHUNK_BUDGET_PER_FRAME)
             {
                 var pos = _loadQueue.Dequeue();
@@ -176,6 +183,12 @@ namespace GalaxyAgent.Map
         /// 将块数据渲染到Tilemap
         /// 使用批量设置优化性能
         /// </summary>
+        /// <summary>
+        /// 将块数据渲染到Tilemap：批量 SetTiles + 纯色Tile(每 TileType 一个，自带 color)。
+        /// 性能优先：批量 SetTiles 远快于 per-cell SetColor。
+        /// (风格渲染的 per-cell SetColor 性能不足，已暂时停用；MapStyleProfile 等代码保留备用，
+        ///  待加 chunk 颜色缓存优化后可恢复风格切换。)
+        /// </summary>
         private void RenderChunk(ChunkData chunkData)
         {
             int size = chunkData.Width * chunkData.Height;
@@ -196,8 +209,6 @@ namespace GalaxyAgent.Map
                     index++;
                 }
             }
-
-            // 批量设置Tile（性能远优于逐个SetTile）
             _terrainTilemap.SetTiles(positions, tiles);
         }
 
@@ -216,7 +227,7 @@ namespace GalaxyAgent.Map
         {
             int centerChunkX = Mathf.FloorToInt(centerPosition.x / Constants.CHUNK_SIZE);
             int centerChunkY = Mathf.FloorToInt(centerPosition.y / Constants.CHUNK_SIZE);
-            int radius = 4; // 初始加载更大范围
+            int radius = 6; // 初始加载更大范围(覆盖初始视野+余量)
 
             for (int dx = -radius; dx <= radius; dx++)
             {
@@ -248,6 +259,64 @@ namespace GalaxyAgent.Map
             _loadedChunks.Clear();
             _loadQueue.Clear();
             _unloadList.Clear();
+        }
+
+        /// <summary>
+        /// 切换地图视觉风格：更新材质参数 + 重渲染所有已加载块。由设置面板调用。
+        /// </summary>
+        public void SetStyle(MapStyleProfile profile)
+        {
+            if (profile == null) return;
+            _currentProfile = profile;
+            ApplyFxParams();
+
+            // 重渲染所有已加载块(用新风格的配色)
+            var keys = new List<string>(_loadedChunks.Keys);
+            foreach (var key in keys)
+            {
+                var parts = key.Split('_');
+                int cx = int.Parse(parts[0]);
+                int cy = int.Parse(parts[1]);
+                if (_mapGenerator.Chunks.TryGetValue(key, out var chunkData))
+                    RenderChunk(chunkData);
+            }
+            Debug.Log($"[ChunkManager] 切换风格: {profile.Name}，重渲染 {keys.Count} 块");
+        }
+
+        /// <summary>给 TilemapRenderer 赋 ScanlineFx 动画材质</summary>
+        private void SetupFxMaterial()
+        {
+            if (_fxShader == null) _fxShader = Resources.Load<Shader>("Shaders/ScanlineFx");
+            if (_fxShader == null || _terrainTilemap == null)
+            {
+                Debug.LogWarning("[ChunkManager] ScanlineFx shader 未找到，地图将无动画");
+                return;
+            }
+            var renderer = _terrainTilemap.GetComponent<TilemapRenderer>();
+            if (renderer == null) return;
+            _fxMaterial = new Material(_fxShader);
+            renderer.material = _fxMaterial;
+            ApplyFxParams();
+        }
+
+        /// <summary>把当前风格的 Fx 参数写入材质</summary>
+        private void ApplyFxParams()
+        {
+            if (_fxMaterial == null || _currentProfile?.Fx == null) return;
+            var fx = _currentProfile.Fx;
+            _fxMaterial.SetFloat("_Mode", fx.Mode);
+            _fxMaterial.SetFloat("_ScanFreq", fx.ScanFreq);
+            _fxMaterial.SetFloat("_ScanSpeed", fx.ScanSpeed);
+            _fxMaterial.SetFloat("_ScanAmp", fx.ScanAmp);
+            _fxMaterial.SetFloat("_ScanWidth", fx.ScanWidth);
+            _fxMaterial.SetColor("_ScanColor", fx.ScanColor);
+            _fxMaterial.SetFloat("_CenterX", fx.CenterX);
+            _fxMaterial.SetFloat("_CenterY", fx.CenterY);
+            _fxMaterial.SetFloat("_PulseAmp", fx.PulseAmp);
+            _fxMaterial.SetFloat("_PulseSpeed", fx.PulseSpeed);
+            _fxMaterial.SetFloat("_FlickerAmp", fx.FlickerAmp);
+            _fxMaterial.SetFloat("_FlickerSpeed", fx.FlickerSpeed);
+            _fxMaterial.SetFloat("_FxTime", 0f);
         }
 
         private static string GetChunkKey(int cx, int cy) => $"{cx}_{cy}";

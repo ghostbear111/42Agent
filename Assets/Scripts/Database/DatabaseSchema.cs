@@ -10,7 +10,7 @@ namespace GalaxyAgent.Database
     public static class DatabaseSchema
     {
         // 当前数据库版本
-        private const int DB_VERSION = 5;
+        private const int DB_VERSION = 6;
 
         /// <summary>
         /// 创建所有表（如果不存在）
@@ -50,6 +50,12 @@ namespace GalaxyAgent.Database
             if (!ColumnExists(connection, "saves", "llm_model"))
             {
                 connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN llm_model TEXT NOT NULL DEFAULT ''");
+            }
+
+            // 版本迁移：星球介绍列（LLM 创建星球时生成，游戏内顶栏点击星球名可查看）
+            if (!ColumnExists(connection, "saves", "planet_description"))
+            {
+                connection.ExecuteNonQuery("ALTER TABLE saves ADD COLUMN planet_description TEXT NOT NULL DEFAULT ''");
             }
 
             // 地图区域数据

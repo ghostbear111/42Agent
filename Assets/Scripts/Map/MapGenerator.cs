@@ -4,6 +4,7 @@
 /// 核心流程：种子 → 噪声 → 生物群系 → 瓦片类型 → 资源分布 → 威胁分布
 /// </summary>
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using GalaxyAgent.Core;
 using GalaxyAgent.Data.Enums;
@@ -84,6 +85,54 @@ namespace GalaxyAgent.Map
         }
 
         /// <summary>
+        /// 协程版地图生成：按地形行（cx）分批 yield，让调用方在生成期间刷新 Loading 进度。
+        /// 计算顺序与 <see cref="Generate"/> 完全一致，保证种子确定性。
+        /// 适用于大地图：同步 Generate 会阻塞主线程导致进度条卡死，协程版按行让出帧，进度条平滑推进。
+        /// 进度区间：地形行 0→0.75，资源 0.78，威胁 0.82，生成完成 0.85（后续阶段由调用方填到 1）。
+        /// </summary>
+        /// <param name="onProgress">进度回调：(阶段提示, 0~0.85 进度)</param>
+        public IEnumerator GenerateCoroutine(Action<string, float> onProgress = null)
+        {
+            // 初始化Tile调色板
+            TilePalette.ClearCache();
+
+            int totalChunks = _chunkCountX * _chunkCountY;
+            int done = 0;
+            // 自适应 yield 间隔：约 40 次进度更新，避免行数过多时帧开销累积
+            int yieldInterval = Math.Max(1, _chunkCountX / 40);
+
+            // 按行生成所有块的地形数据
+            for (int cx = 0; cx < _chunkCountX; cx++)
+            {
+                for (int cy = 0; cy < _chunkCountY; cy++)
+                {
+                    GenerateChunk(cx, cy);
+                }
+                done += _chunkCountY;
+
+                // 每隔若干行报进度并让出一帧（让 Loading 渲染 + 进度推进）
+                if (cx % yieldInterval == 0 || cx == _chunkCountX - 1)
+                {
+                    onProgress?.Invoke("正在生成地形…", 0.75f * done / totalChunks);
+                    yield return null;
+                }
+            }
+
+            // 分布资源节点
+            onProgress?.Invoke("正在分布资源…", 0.78f);
+            yield return null;
+            DistributeResources();
+
+            // 分布威胁实体
+            onProgress?.Invoke("正在分布威胁…", 0.82f);
+            yield return null;
+            DistributeThreats();
+
+            onProgress?.Invoke("地图生成完成", 0.85f);
+            Debug.Log($"[MapGenerator] 地图生成完成(协程) - 资源:{_resources.Count}, 威胁:{_threats.Count}");
+        }
+
+        /// <summary>
         /// 只生成指定区域的块（按需加载模式）
         /// </summary>
         public void GenerateChunk(int chunkX, int chunkY)
@@ -127,6 +176,7 @@ namespace GalaxyAgent.Map
                     var tile = new TileData(worldX, worldY, tileType)
                     {
                         Biome = biome,
+                        Height = heightNoise,
                         Temperature = BiomeManager.GetBiomeTemperature(biome) + (tempNoise - 0.5f) * 20f,
                         Radiation = Mathf.Clamp01(
                             BiomeManager.GetBiomeRadiation(biome) + (radNoise - 0.5f) * 0.3f)

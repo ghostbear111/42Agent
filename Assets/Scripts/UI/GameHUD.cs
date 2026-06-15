@@ -82,8 +82,15 @@ namespace GalaxyAgent.UI
         private GameConfigPanel _configPanel;
         // 科技树面板（基地"科技树"按钮入口）
         private TechTreePanel _techTreePanel;
+        // 星球名按钮（顶栏，点击打开星球介绍档案面板）
+        private Button _buttonPlanet;
+        // 星球介绍档案面板（顶栏点击星球名触发）
+        private PlanetInfoPanel _planetInfoPanel;
         // 自动保存状态文本（底栏中部，显示开关/倒计时/上次保存时间）
         private Text _autoSaveText;
+        // 设置面板（收纳 保存/返回菜单/LLM对话/配置 4 按钮，ESC 与"设置"按钮开关）
+        private GameObject _settingsPanel;
+        private bool _settingsVisible = false;
         // 距离下次自动保存的倒计时（现实秒）
         private float _autoSaveTimer = 0f;
         // 上次自动/手动保存时的游戏天数（用于显示）
@@ -152,6 +159,21 @@ namespace GalaxyAgent.UI
             UpdateResourceDisplay();
             UpdateWeatherDisplay();
             UpdateAutoSave();
+            HandleShortcuts();
+        }
+
+        /// <summary>全局快捷键：空格 toggle 暂停/恢复，ESC 开关设置面板</summary>
+        private void HandleShortcuts()
+        {
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                float cur = GameManager.Instance != null ? GameManager.Instance.TimeMultiplier : 1f;
+                SetSpeed(cur <= 0f ? 1f : 0f);
+            }
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                ShowSettings(!_settingsVisible);
+            }
         }
 
         // ==================== 运行时UI构建 ====================
@@ -178,17 +200,23 @@ namespace GalaxyAgent.UI
             // 时间文本（顶栏左侧）
             textTime = RuntimeUIBuilder.CreateText("Time", topBar.transform,
                 "第1天 00:00", 18, new Color(0.85f, 0.9f, 1f),
-                TextAnchor.MiddleLeft, 0.01f, 0.05f, 0.22f, 0.95f);
+                TextAnchor.MiddleLeft, 0.01f, 0.05f, 0.16f, 0.95f);
 
             // 速度文本
             textSpeed = RuntimeUIBuilder.CreateText("Speed", topBar.transform,
                 "1x", 16, new Color(0.7f, 0.8f, 1f),
-                TextAnchor.MiddleLeft, 0.22f, 0.05f, 0.32f, 0.95f);
+                TextAnchor.MiddleLeft, 0.16f, 0.05f, 0.23f, 0.95f);
 
             // ---------- 天气图标（速度右侧，据当前天气切换占位图） ----------
             _weatherIcon = RuntimeUIBuilder.CreateColorBlock("WeatherIcon", topBar.transform,
-                Color.white, 0.32f, 0.30f, 0.40f, 0.70f);
+                Color.white, 0.23f, 0.30f, 0.29f, 0.70f);
             SpriteRegistry.ApplySpriteOrColor(_weatherIcon, SpriteRegistry.GetWeather(WeatherType.Clear));
+
+            // ---------- 星球名按钮（天气右侧，点击打开星球介绍档案） ----------
+            _buttonPlanet = RuntimeUIBuilder.CreateButton("BtnPlanet", topBar.transform,
+                "星球", new Color(0.2f, 0.25f, 0.4f),
+                0.30f, 0.1f, 0.46f, 0.9f);
+            _buttonPlanet.onClick.AddListener(OnPlanetClicked);
 
             // ---------- 资源显示区域（顶栏右侧，颜色方块+数值） ----------
             // 5种资源：矿物(棕) 晶体(黄) 水(蓝) 有机(绿) 遗迹(紫)
@@ -205,9 +233,9 @@ namespace GalaxyAgent.UI
             var resourceTypes = new[] { ResourceType.Mineral, ResourceType.Crystal,
                 ResourceType.Water, ResourceType.Organic, ResourceType.RuinData };
 
-            // 资源区域占顶栏右侧 0.34 ~ 1.0，每个资源占约0.13宽度
-            float resStartX = 0.42f;
-            float resWidth = 0.114f;
+            // 资源区域占顶栏右侧（星球名按钮之后），每个资源占约0.10宽度
+            float resStartX = 0.48f;
+            float resWidth = 0.098f;
 
             for (int i = 0; i < 5; i++)
             {
@@ -238,46 +266,37 @@ namespace GalaxyAgent.UI
                 new Color(0.04f, 0.04f, 0.1f, 0.9f),
                 0f, 0f, 1f, 0.08f);
 
-            // 速度控制按钮（底栏左侧）
-            buttonPause = RuntimeUIBuilder.CreateButton("BtnPause", bottomBar.transform,
-                "暂停", new Color(0.35f, 0.35f, 0.4f),
-                0.01f, 0.1f, 0.1f, 0.9f);
-
+            // 速度控制按钮（底栏左侧）；暂停改为空格键，不再设独立按钮
             buttonSpeed1x = RuntimeUIBuilder.CreateButton("Btn1x", bottomBar.transform,
                 "1x", new Color(0.2f, 0.4f, 0.6f),
-                0.11f, 0.1f, 0.18f, 0.9f);
+                0.01f, 0.1f, 0.08f, 0.9f);
 
             buttonSpeed2x = RuntimeUIBuilder.CreateButton("Btn2x", bottomBar.transform,
                 "2x", new Color(0.2f, 0.4f, 0.6f),
-                0.19f, 0.1f, 0.26f, 0.9f);
+                0.09f, 0.1f, 0.16f, 0.9f);
 
             buttonSpeed5x = RuntimeUIBuilder.CreateButton("Btn5x", bottomBar.transform,
                 "5x", new Color(0.2f, 0.4f, 0.6f),
-                0.27f, 0.1f, 0.34f, 0.9f);
+                0.17f, 0.1f, 0.24f, 0.9f);
 
-            // 游戏配置按钮（底栏左侧空白区，打开运行时配置面板）
-            buttonConfig = RuntimeUIBuilder.CreateButton("BtnConfig", bottomBar.transform,
-                "配置", new Color(0.3f, 0.35f, 0.2f),
-                0.35f, 0.1f, 0.45f, 0.9f);
+            // 暂停提示（空格=暂停/恢复）
+            RuntimeUIBuilder.CreateText("PauseHint", bottomBar.transform,
+                "空格 暂停", 12, new Color(0.6f, 0.65f, 0.8f),
+                TextAnchor.MiddleCenter, 0.25f, 0.1f, 0.36f, 0.9f);
 
-            // LLM对话查看按钮（配置右侧，紫色标识）
-            buttonLLMChat = RuntimeUIBuilder.CreateButton("BtnLLMChat", bottomBar.transform,
-                "LLM对话", new Color(0.35f, 0.25f, 0.55f),
-                0.46f, 0.1f, 0.58f, 0.9f);
-
-            // 自动保存状态文本（底栏中部，显示开关/倒计时/上次保存游戏天数）
+            // 自动保存状态文本（底栏中部）
             _autoSaveText = RuntimeUIBuilder.CreateText("AutoSaveStatus", bottomBar.transform,
                 "自动保存: --", 12, new Color(0.7f, 0.75f, 0.6f),
-                TextAnchor.MiddleCenter, 0.59f, 0.1f, 0.71f, 0.9f);
+                TextAnchor.MiddleCenter, 0.38f, 0.1f, 0.78f, 0.9f);
 
-            // 操作按钮（底栏右侧）
-            buttonSave = RuntimeUIBuilder.CreateButton("BtnSave", bottomBar.transform,
-                "保存", new Color(0.15f, 0.45f, 0.25f),
-                0.72f, 0.1f, 0.84f, 0.9f);
+            // 设置按钮（底栏右侧，打开设置面板：保存/返回菜单/LLM对话/配置）
+            var btnSettings = RuntimeUIBuilder.CreateButton("BtnSettings", bottomBar.transform,
+                "设置", new Color(0.3f, 0.3f, 0.4f),
+                0.86f, 0.1f, 0.99f, 0.9f);
+            btnSettings.onClick.AddListener(() => ShowSettings(true));
 
-            buttonMainMenu = RuntimeUIBuilder.CreateButton("BtnMenu", bottomBar.transform,
-                "返回菜单", new Color(0.5f, 0.15f, 0.15f),
-                0.85f, 0.1f, 0.99f, 0.9f);
+            // 设置面板（收纳 保存/返回菜单/LLM对话/配置，ESC 与"设置"按钮开关）
+            BuildSettingsPanel();
 
             // ==================== LLM对话查看窗口 ====================
             // 运行时自构建，初始隐藏，点击"LLM对话"按钮切换显示
@@ -311,6 +330,11 @@ namespace GalaxyAgent.UI
             var techPanelObj = MakeFullScreenContainer("TechTreePanel", transform);
             _techTreePanel = techPanelObj.AddComponent<TechTreePanel>();
             _techTreePanel.BuildUI(techPanelObj.transform);
+
+            // 星球介绍档案面板（顶栏点击星球名触发，展示LLM生成的星球介绍）
+            var planetPanelObj = MakeFullScreenContainer("PlanetInfoPanel", transform);
+            _planetInfoPanel = planetPanelObj.AddComponent<PlanetInfoPanel>();
+            _planetInfoPanel.BuildUI(planetPanelObj.transform);
 
             Debug.Log("[GameHUD] UI构建完成");
         }
@@ -576,6 +600,9 @@ namespace GalaxyAgent.UI
             // 填充头像选择条（此时_agents已知）
             PopulateAgentBar();
 
+            // 顶栏星球名按钮显示当前星球名
+            UpdatePlanetButton();
+
             Debug.Log("[GameHUD] 初始化完成，子系统已连接");
         }
 
@@ -644,6 +671,24 @@ namespace GalaxyAgent.UI
             if (w == _lastDisplayedWeather) return;
             _lastDisplayedWeather = w;
             SpriteRegistry.ApplySpriteOrColor(_weatherIcon, SpriteRegistry.GetWeather(w));
+        }
+
+        /// <summary>把顶栏星球名按钮的文字更新为当前星球名</summary>
+        private void UpdatePlanetButton()
+        {
+            if (_buttonPlanet == null) return;
+            var txt = _buttonPlanet.GetComponentInChildren<Text>();
+            if (txt != null)
+                txt.text = _mapConfig != null ? (_mapConfig.PlanetName ?? "星球") : "星球";
+        }
+
+        /// <summary>点击顶栏星球名：打开星球介绍档案面板（展示LLM生成的介绍+环境参数）</summary>
+        private void OnPlanetClicked()
+        {
+            if (_planetInfoPanel == null) return;
+            string name = _mapConfig != null ? (_mapConfig.PlanetName ?? "未知星球") : "未知星球";
+            string desc = _mapConfig != null ? (_mapConfig.PlanetDescription ?? "") : "";
+            _planetInfoPanel.Show(name, desc, _mapConfig);
         }
 
         // ==================== 按钮事件 ====================
@@ -740,6 +785,74 @@ namespace GalaxyAgent.UI
             }
             if (_configPanel.IsVisible) _configPanel.Hide();
             else _configPanel.Show();
+        }
+
+        /// <summary>
+        /// 构建设置面板：半透明遮罩 + 居中面板 + 4 按钮(保存/LLM对话/配置/返回菜单) + 关闭。
+        /// 把原本散落在底栏的 4 个功能按钮收拢到此；ESC 与底栏"设置"按钮开关。
+        /// </summary>
+        private void BuildSettingsPanel()
+        {
+            var container = MakeFullScreenContainer("SettingsPanel", transform);
+            _settingsPanel = container;
+
+            // 半透明遮罩（拦截背后点击）
+            RuntimeUIBuilder.CreatePanel("SettingsMask", container.transform,
+                new Color(0f, 0f, 0f, 0.6f), 0f, 0f, 1f, 1f);
+
+            // 居中面板
+            var box = RuntimeUIBuilder.CreatePanel("SettingsBox", container.transform,
+                new Color(0.06f, 0.08f, 0.14f, 0.98f), 0.36f, 0.18f, 0.64f, 0.82f);
+
+            // 标题
+            RuntimeUIBuilder.CreateText("Title", box.transform, "设置", 28,
+                new Color(0.9f, 0.85f, 0.4f), TextAnchor.MiddleCenter, 0f, 0.86f, 0.9f, 1f);
+
+            // 关闭按钮（右上角）
+            var btnClose = RuntimeUIBuilder.CreateButton("BtnClose", box.transform,
+                "X", new Color(0.5f, 0.15f, 0.15f), 0.9f, 0.88f, 1f, 1f);
+            btnClose.onClick.AddListener(() => ShowSettings(false));
+
+            // 4 个功能按钮（从上到下）。这些 public 字段同时供 Start 绑定事件。
+            // (地图风格切换因 per-cell 渲染性能不足已暂时移除；MapStyleProfile 等代码保留备用)
+            buttonSave = RuntimeUIBuilder.CreateButton("BtnSave", box.transform,
+                "保存", new Color(0.15f, 0.45f, 0.25f), 0.1f, 0.68f, 0.9f, 0.80f);
+
+            buttonLLMChat = RuntimeUIBuilder.CreateButton("BtnLLMChat", box.transform,
+                "LLM对话", new Color(0.35f, 0.25f, 0.55f), 0.1f, 0.54f, 0.9f, 0.66f);
+
+            buttonConfig = RuntimeUIBuilder.CreateButton("BtnConfig", box.transform,
+                "配置", new Color(0.3f, 0.35f, 0.2f), 0.1f, 0.40f, 0.9f, 0.52f);
+
+            buttonMainMenu = RuntimeUIBuilder.CreateButton("BtnMenu", box.transform,
+                "返回菜单", new Color(0.5f, 0.15f, 0.15f), 0.1f, 0.26f, 0.9f, 0.38f);
+
+            container.SetActive(false);
+        }
+
+        /// <summary>开关设置面板</summary>
+        private void ShowSettings(bool show)
+        {
+            if (_settingsPanel != null) _settingsPanel.SetActive(show);
+            _settingsVisible = show;
+        }
+
+        /// <summary>切换地图视觉风格：应用到 ChunkManager 即时重渲染 + 存 GameConfig</summary>
+        private void OnMapStyleChanged(int index)
+        {
+            var profiles = MapStyleProfilePalette.All;
+            if (index < 0 || index >= profiles.Count) return;
+            var profile = profiles[index];
+
+            var cm = FindFirstObjectByType<ChunkManager>();
+            if (cm != null) cm.SetStyle(profile);
+
+            if (GameConfigManager.Instance != null && GameConfigManager.Instance.Config?.MapStyle != null)
+            {
+                GameConfigManager.Instance.Config.MapStyle.StyleId = profile.Id;
+                GameConfigManager.Instance.Save();
+            }
+            Debug.Log($"[GameHUD] 地图风格切换: {profile.Name}");
         }
 
         /// <summary>

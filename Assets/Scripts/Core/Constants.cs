@@ -21,8 +21,8 @@ namespace GalaxyAgent.Core
         public const int CHUNK_SIZE = 64;
         /// <summary>视口外额外加载的块数（防止边缘闪烁）</summary>
         public const int CHUNK_LOAD_MARGIN = 2;
-        /// <summary>每帧最大加载/卸载块数</summary>
-        public const int CHUNK_BUDGET_PER_FRAME = 4;
+        /// <summary>每帧最大加载/卸载块数（8=加大以减少快速移动时的空白区域）</summary>
+        public const int CHUNK_BUDGET_PER_FRAME = 8;
 
         /// <summary>小型地图尺寸（格数）</summary>
         public const int MAP_SIZE_SMALL = 1024;
